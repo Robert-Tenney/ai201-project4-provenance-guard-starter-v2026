@@ -46,17 +46,11 @@ A submission takes this path:
 6. **The audit log** (`audit.py::log_decision`) appends a JSON line to `logs/audit.jsonl` with the content id, creator id, both signal scores, the combined score, the label, and status `decided`.
 7. **The response** returns the `content_id`, guess, confidence, label, and both signal scores. If the writer disagrees, `POST /appeal` with that `content_id` sets the status to `under_review` and records their reasoning next to the original decision.
 
-*Status: steps 1, 2 and 6 are built (Milestone 3). Steps 3 to 5 are built in Milestones 4 and 5.*
+*Status: steps 1 to 4 and 6 are built (Milestones 3 and 4). The label text in step 5 and the appeal in step 7 are built in Milestone 5.*
 
 ---
 
 ## Signals and Scoring
-
-<!-- For each signal: what property it measures, why that might differ between
-     human and AI writing, and WHAT IT CAN'T SEE.
-
-     The blind spot is not optional. If you can't name it you don't understand
-     the signal yet — and unit 8's attack set is built out of blind spots. -->
 
 ### Signal one — the model signal
 
@@ -66,41 +60,71 @@ A submission takes this path:
 
 **What it can't see:** Predictability is not authorship. It rewards common words in short, ordinary sentences, and plenty of real people write that way: second-language writers sticking to vocabulary they're sure of, younger writers, anyone writing plainly on purpose. That writing scores as machine-like. The reverse also happens: dense, ornate human prose full of rare words scores as human, and so can AI text that has been made to sound unusual. The writers this signal is most likely to wrongly accuse are the ones with the least room to argue back.
 
-**Milestone 3 check: signal one run on three texts** (from `python detector.py`; `model_signal`, higher = more AI-like):
+**Milestone 3 check: signal one alone on three texts** (`python detector.py`, higher = more AI-like):
 
 | Test text | model_score |
 |---|---|
-| 1. Text I'm sure a person wrote (mine) | 0.6892 |
-| 2. A text in between | 0.7047 |
-| 3. Text I'm sure is AI (the "implementation of the proposed framework" paragraph) | 0.8577 |
+| Human (mine): "What in the name of 'Sweet Home Alabama' was I forced to hear?" | 0.6892 |
+| Human (mine): "What in the name of 'Sweet Home Alabama' did I just witness" | 0.7047 |
+| AI: the "implementation of the proposed framework" paragraph | 0.8577 |
 
-Signal one alone scored both of my texts above the 0.65 `AI_THRESHOLD`. The gap between my own writing and the AI paragraph is only about 0.17. That supports the blind spot above: this signal on its own would call some of my human writing AI, so it can't be trusted alone. This is the reason for the second signal and for the combining rule in Milestone 4.
+Signal one alone scored both of my own sentences above the 0.65 `AI_THRESHOLD`, and the gap between my writing and the AI paragraph was only about 0.15 to 0.17. On its own it would have accused me of being a machine. That is the false positive from Milestone 1 happening to a real writer, and it is why there is a second signal and a combining rule.
 
 ### Signal two — the style signal
 
-**What it measures:** The shape of the text without reading it, using sentence-length spread, type-token ratio (vocabulary repetition), and punctuation density. Implemented in `stylometry.py::style_signal`. *(Built in Milestone 4.)*
+**What it measures:** The shape of the text without reading it, from three measures (`stylometry.py`):
+- `sentence_length_spread`: standard deviation of sentence length divided by the mean (coefficient of variation). Higher = more varied.
+- `type_token_ratio`: unique words over total words, measured on the first 100 words only so text length alone can't move it. Higher = more varied vocabulary.
+- `punctuation_density`: commas, semicolons, colons, dashes, brackets, quotes, `!` and `?` per word (full stops excluded). Higher = more punctuation.
+
+All three run "higher = more human", so `style_signal` flips each onto a 0-1 "AI-ness" scale (linear between a fully-AI value and a fully-human value) and takes a weighted average: spread 0.5, type-token ratio 0.3, punctuation 0.2. Higher = more likely AI, the same direction as signal one. Edge cases return neutral 0.5 (under 3 words), and a one-sentence text drops the spread measure and re-weights the other two.
 
 **Why that might differ between human and AI writing:** Generated prose tends toward even, mid-length sentences and a narrower band of vocabulary. Human writing is lumpier, with a three-word sentence next to a forty-word one.
 
-**What it can't see:** It cannot read. Anything that changes the shape without changing the substance moves it: typos, chopped-up sentences, a pasted quotation. That is very cheap to do on purpose. Type-token ratio also falls as text gets longer, so length alone can look like a signal. Short, plain human writing looks uniform to it, which is the same writer signal one is likely to accuse.
+**What it can't see:** It cannot read. Anything that changes the shape without changing the substance moves it: typos, chopped-up sentences, a pasted quotation. That is very cheap to do on purpose. Short, plain human writing also looks uniform to it, the same writers signal one is likely to accuse.
+
+**What my first runs showed about it** (`python stylometry.py`, raw measure values):
+
+| Text | spread | type-token | punctuation | style_signal |
+|---|---|---|---|---|
+| AI paragraph (85 words, 5 sentences) | 0.239 | 0.753 | 0.047 | 0.6160 |
+| "...did I just witness" (12 words, 1 sentence) | 0.000 | 1.000 | 0.000 | 0.4000 |
+| "...was I forced to hear?" (13 words, 1 sentence) | 0.000 | 1.000 | 0.077 | 0.2103 |
+
+- The direction is right: the AI paragraph scored higher (0.616) than both of my sentences (0.40 and 0.21).
+- **Type-token ratio does almost nothing here.** The AI paragraph's 0.753 sits at the human end of my scale (0.75), so it added zero AI-ness. Very short texts score 1.000 because there is hardly any room to repeat a word. So the ratio is uninformative at both ends of the length range.
+- **The one-sentence texts have no spread measure**, so their scores rest on only vocabulary and punctuation. The difference between 0.40 and 0.21 for two near-identical sentences came entirely from one question mark. That is a fragile basis, and it is the "short text" blind spot in practice.
+- The AI paragraph's 0.616 is only moderately high. It came from low sentence-length spread (0.239) and low punctuation.
+
+*Scale endpoints and weights: none changed so far. They are the starting guesses I set before measuring.*
 
 ### The combining rule
 
-<!-- Write the rule in words, then give the numbers. What happens when the two
-     signals disagree? -->
+**The rule:** Take a weighted average of the two signals. If the two signals differ by more than 0.35, clamp the result into the unsure band (never below 0.36 or above 0.64), so a disagreement can never produce a confident label of either kind.
 
-**The rule:** *PENDING (Milestone 4). Write the rule in words before coding it.*
+**Why:** Signal one over-scores plain human writing (my own texts scored 0.69 and 0.70), and signal two is easy to fool with typos. When they point opposite ways that is uncertainty, not a verdict. The cost is that AI text caught by only one signal lands in "unsure" instead of "ai". I chose that trade because a wrong accusation costs a writer far more than a missed detection costs the site.
 
-**The numbers:** *PENDING (Milestone 4). Weights and thresholds live in `config.py`.*
+**The numbers:** `WEIGHT_MODEL_SIGNAL = 0.5`, `WEIGHT_STYLE_SIGNAL = 0.5`, `DISAGREEMENT_GAP = 0.35`, `HUMAN_THRESHOLD = 0.35`, `AI_THRESHOLD = 0.65`. All in `config.py`. Equal weights because neither signal has earned more trust yet.
 
 **Where it lives:** `scoring.py::combine_signals`
 
-<!-- ⚠️ The grader checks your code against that line. If your rule lives
-     somewhere else, say where. -->
+**Both signals on the same texts** (the first three rows are calculated from the rule, the fourth is real `/submit` output; confirm the first three with `python calibrate.py`):
 
-**A case where my two signals split, and what my rule does with it:**
+| Input | model_score | style_score | combined | gap | guess |
+|---|---|---|---|---|---|
+| AI paragraph (5-sentence version) | 0.8577 | 0.6160 | 0.7369 | 0.24 | ai |
+| Human: "...did I just witness" | 0.7047 | 0.4000 | 0.5524 | 0.30 | unsure |
+| Human: "...was I forced to hear?" | 0.6892 | 0.2103 | 0.4498 | 0.48 | unsure (split) |
+| AI text (3-sentence version, via /submit) | 0.8864 | 0.6208 | 0.7536 | 0.27 | ai |
 
-*PENDING (Milestone 4).*
+*Still to add from `calibrate.py`: the formal-human and lightly-edited-AI inputs. PASTE THEIR ROWS HERE.*
+
+**A case where my two signals split, and what my rule does with it:** "What in the name of 'Sweet Home Alabama' was I forced to hear?" is a short sentence I wrote myself. Signal one scored it 0.6892 (AI-like), because it is short and made of common words. Signal two scored it 0.2103 (human-like), because the question mark gave it some punctuation and it has no repeated words. The gap is 0.48, above the 0.35 limit, so the clamp applies. The weighted average of 0.4498 is already inside the unsure band, so it stays 0.4498 and the guess is "unsure". Signal one alone would have given this a confident AI accusation (0.6892 is above 0.65). The combining rule is what prevented a false positive on my own writing.
+
+**What the table showed:**
+- Plain human writing stayed below the 0.65 AI threshold in both cases, but neither human text reached the "human" label (both are "unsure"). That is a concern for Milestone 5, which needs all three labels reachable.
+- The AI texts (0.7369 and 0.7536) scored about 0.24 to 0.25 above the human average (0.5011), short of criterion 2's 0.30 target. This is a very small sample: 2 AI texts and 2 human texts, not the 5 and 5 the criterion calls for. I am not changing the target. The full test runs in unit 8.
+- Neither signal returned the same number for everything, but the type-token ratio did nothing useful on this data (see above).
 
 ---
 
@@ -111,7 +135,7 @@ Signal one alone scored both of my texts above the 0.65 `AI_THRESHOLD`. The gap 
 
      Write them for someone who has never heard the word "threshold". -->
 
-*PENDING (Milestone 5). Current `config.py` thresholds: human below 0.35, unsure 0.35 to 0.65, AI above 0.65.*
+*PENDING (Milestone 5). Current `config.py` thresholds: human at or below 0.35, unsure 0.35 to 0.65, AI at or above 0.65.*
 
 | Label | Score range | The exact text a reader sees |
 |---|---|---|
@@ -126,9 +150,6 @@ Signal one alone scored both of my texts above the 0.65 `AI_THRESHOLD`. The gap 
 ---
 
 ## Sample Run
-
-<!-- One submission and one appeal, pasted as text: the request, the response,
-     and the log entries. -->
 
 **Before any submission** (the log is empty)
 
@@ -145,7 +166,7 @@ PS> curl.exe "http://127.0.0.1:5000/log"
 
 **A submission**
 
-*(Milestone 3 state: `model_score` is real. `style_score` and `confidence` are `null`, and the label is a placeholder, until Milestones 4 and 5.)*
+*(Milestone 4 state: `model_score`, `style_score` and `confidence` are all real. The label text is still a placeholder until Milestone 5. `confidence` is the combined score, where higher means more likely AI.)*
 
 ```powershell
 PS> $body = @{ text = "The implementation of the proposed framework requires careful consideration of several key factors. First, it is important to note that the system must be able to handle a wide variety of different inputs. Additionally, the overall performance of the solution depends on a number of important variables."; creator_id = "me" } | ConvertTo-Json
@@ -153,12 +174,22 @@ PS> Invoke-RestMethod -Method Post -Uri http://127.0.0.1:5000/submit -ContentTyp
 ```
 
 ```json
-PASTE THE REAL /submit RESPONSE HERE
+{
+  "content_id": "8944c449-e06d-42ba-81f0-860e697d5a41",
+  "guess": "ai",
+  "confidence": 0.7536,
+  "label": "PLACEHOLDER — write the high-confidence AI label.",
+  "model_score": 0.8864,
+  "style_score": 0.6208,
+  "status": "decided"
+}
 ```
+
+The combining rule gave (0.8864 + 0.6208) / 2 = 0.7536. The two signals differ by 0.27, under the 0.35 disagreement limit, so no clamp applied, and 0.7536 is above the 0.65 AI threshold, so the guess is `ai`.
 
 **A rejected request**
 
-My first attempts sent the body through `curl.exe` from PowerShell, and the quoting mangled it, so Flask never received a JSON object. The service correctly refused each one with `invalid_body` and logged it. That is the bad-input path from criterion 5 working, and it shows up in the audit log:
+My first attempts sent the body through `curl.exe` from PowerShell, and the quoting mangled it, so Flask never received a JSON object. The service correctly refused each one with `invalid_body` and logged it. That is the bad-input path from criterion 5 working. These lines are from that earlier run (I cleared the log afterwards):
 
 ```jsonl
 {"timestamp": "2026-10-29T18:37:18+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "invalid_body"}
@@ -175,16 +206,35 @@ My first attempts sent the body through `curl.exe` from PowerShell, and the quot
 **What the log shows afterwards**
 
 ```powershell
-PS> curl.exe "http://127.0.0.1:5000/log?limit=3"
+PS> curl.exe "http://127.0.0.1:5000/log?limit=1"
 ```
 
 ```json
-PASTE THE REAL /log OUTPUT HERE (should show your decided entry with a content_id and model_score)
+{
+  "count": 1,
+  "entries": [
+    {
+      "combined_score": 0.7536,
+      "content_id": "8944c449-e06d-42ba-81f0-860e697d5a41",
+      "creator_id": "me",
+      "guess": "ai",
+      "label": "PLACEHOLDER — write the high-confidence AI label.",
+      "model_score": 0.8864,
+      "status": "decided",
+      "style_score": 0.6208,
+      "timestamp": "2026-10-29T19:47:12+00:00"
+    }
+  ]
+}
 ```
+
+The log entry has the same `content_id` as the response, and it records both signal scores and the combined score.
 
 ---
 
 ## How I Used AI
+
+*Fill in two specific moments from your own work by Milestone 6. For each: what you asked, what came back, what you changed.*
 
 **Moment 1**
 
