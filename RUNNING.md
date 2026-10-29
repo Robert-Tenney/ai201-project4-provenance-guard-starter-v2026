@@ -71,7 +71,7 @@ doesn't, it's the service itself, and that's a help-channel question.
 Then try the route you're going to build:
 
 ```bash
-curl -X POST http://127.0.0.1:5000/submit \
+curl.exe -X POST http://127.0.0.1:5000/submit \
   -H "Content-Type: application/json" \
   -d '{"text": "some writing", "creator_id": "me"}'
 ```
