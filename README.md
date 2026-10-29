@@ -25,13 +25,6 @@
 
 ---
 
-<!-- ─────────────────────────────────────────────────────────────────────────
-     Unit 7 asks for the first five sections. Unit 8 adds the five below.
-
-     Everything is pasted as TEXT. A pasted curl response gets full credit;
-     a picture of your terminal gets none.
-     ───────────────────────────────────────────────────────────────────────── -->
-
 <!-- ═══════════════════════ UNIT 7 — THE BUILD ═══════════════════════ -->
 
 ## What This Does
@@ -44,9 +37,7 @@ A submission takes this path:
 4. **The combining rule** (`scoring.py::combine_signals`) turns the two scores into one combined score.
 5. **Labelling** (`scoring.py::score_to_label`) maps that score to a guess (`ai`, `human`, or `unsure`) and a plain-language sentence for the reader.
 6. **The audit log** (`audit.py::log_decision`) appends a JSON line to `logs/audit.jsonl` with the content id, creator id, both signal scores, the combined score, the label, and status `decided`.
-7. **The response** returns the `content_id`, guess, confidence, label, and both signal scores. If the writer disagrees, `POST /appeal` with that `content_id` sets the status to `under_review` and records their reasoning next to the original decision.
-
-*Status: steps 1 to 4 and 6 are built (Milestones 3 and 4). The label text in step 5 and the appeal in step 7 are built in Milestone 5.*
+7. **The response** returns the `content_id`, guess, confidence, label, and both signal scores. If the writer disagrees, `POST /appeal` (`app.py::appeal`) with that `content_id` checks the id exists, appends an appeal entry with status `under_review` and the writer's reasoning beside the original decision, and confirms. The log is append-only, so the original decision is never overwritten.
 
 ---
 
@@ -68,7 +59,9 @@ A submission takes this path:
 | Human (mine): "What in the name of 'Sweet Home Alabama' did I just witness" | 0.7047 |
 | AI: the "implementation of the proposed framework" paragraph | 0.8577 |
 
-Signal one alone scored both of my own sentences above the 0.65 `AI_THRESHOLD`, and the gap between my writing and the AI paragraph was only about 0.15 to 0.17. On its own it would have accused me of being a machine. That is the false positive from Milestone 1 happening to a real writer, and it is why there is a second signal and a combining rule.
+Signal one alone scored both of my own short sentences above the 0.65 `AI_THRESHOLD`, and the gap between them and the AI paragraph was only about 0.15 to 0.17. On its own it would have accused me of being a machine. That is the false positive from Milestone 1 happening to a real writer, and it is why there is a second signal and a combining rule.
+
+A longer, more personal piece of my own writing (the "Grandfather's kitchen" paragraph) scored 0.2282 on signal one, clearly human. So signal one separates well on distinctive, specific prose and badly on short, plain sentences, which is the blind spot described above.
 
 ### Signal two — the style signal
 
@@ -102,94 +95,189 @@ All three run "higher = more human", so `style_signal` flips each onto a 0-1 "AI
 
 **The rule:** Take a weighted average of the two signals. If the two signals differ by more than 0.35, clamp the result into the unsure band (never below 0.36 or above 0.64), so a disagreement can never produce a confident label of either kind.
 
-**Why:** Signal one over-scores plain human writing (my own texts scored 0.69 and 0.70), and signal two is easy to fool with typos. When they point opposite ways that is uncertainty, not a verdict. The cost is that AI text caught by only one signal lands in "unsure" instead of "ai". I chose that trade because a wrong accusation costs a writer far more than a missed detection costs the site.
+**Why:** Signal one over-scores plain human writing (my own short sentences scored 0.69 and 0.70), and signal two is easy to fool with typos. When they point opposite ways that is uncertainty, not a verdict. The cost is that AI text caught by only one signal lands in "unsure" instead of "ai". I chose that trade because a wrong accusation costs a writer far more than a missed detection costs the site.
 
 **The numbers:** `WEIGHT_MODEL_SIGNAL = 0.5`, `WEIGHT_STYLE_SIGNAL = 0.5`, `DISAGREEMENT_GAP = 0.35`, `HUMAN_THRESHOLD = 0.35`, `AI_THRESHOLD = 0.65`. All in `config.py`. Equal weights because neither signal has earned more trust yet.
 
 **Where it lives:** `scoring.py::combine_signals`
 
-**Both signals on the same texts** (the first three rows are calculated from the rule, the fourth is real `/submit` output; confirm the first three with `python calibrate.py`):
+**Both signals on the same texts** (rows 1 to 3 calculated from the rule; the others are real `/submit` output):
 
 | Input | model_score | style_score | combined | gap | guess |
 |---|---|---|---|---|---|
 | AI paragraph (5-sentence version) | 0.8577 | 0.6160 | 0.7369 | 0.24 | ai |
-| Human: "...did I just witness" | 0.7047 | 0.4000 | 0.5524 | 0.30 | unsure |
 | Human: "...was I forced to hear?" | 0.6892 | 0.2103 | 0.4498 | 0.48 | unsure (split) |
 | AI text (3-sentence version, via /submit) | 0.8864 | 0.6208 | 0.7536 | 0.27 | ai |
+| Human: "...did I just witness" (via /submit) | 0.7047 | 0.4000 | 0.5524 | 0.30 | unsure |
+| Human: "Grandfather's kitchen" paragraph (via /submit) | 0.2282 | 0.2472 | 0.2377 | 0.02 | human |
+| Human + 1 added sentence: "...forced to hear? I honestly do not know what that was." (via /submit) | 0.7905 | 0.5173 | 0.6539 | 0.27 | ai (false positive) |
 
-*Still to add from `calibrate.py`: the formal-human and lightly-edited-AI inputs. PASTE THEIR ROWS HERE.*
+*Still to add from `python calibrate.py`: the formal-human and lightly-edited-AI inputs. PASTE THEIR ROWS HERE.*
 
 **A case where my two signals split, and what my rule does with it:** "What in the name of 'Sweet Home Alabama' was I forced to hear?" is a short sentence I wrote myself. Signal one scored it 0.6892 (AI-like), because it is short and made of common words. Signal two scored it 0.2103 (human-like), because the question mark gave it some punctuation and it has no repeated words. The gap is 0.48, above the 0.35 limit, so the clamp applies. The weighted average of 0.4498 is already inside the unsure band, so it stays 0.4498 and the guess is "unsure". Signal one alone would have given this a confident AI accusation (0.6892 is above 0.65). The combining rule is what prevented a false positive on my own writing.
 
 **What the table showed:**
-- Plain human writing stayed below the 0.65 AI threshold in both cases, but neither human text reached the "human" label (both are "unsure"). That is a concern for Milestone 5, which needs all three labels reachable.
-- The AI texts (0.7369 and 0.7536) scored about 0.24 to 0.25 above the human average (0.5011), short of criterion 2's 0.30 target. This is a very small sample: 2 AI texts and 2 human texts, not the 5 and 5 the criterion calls for. I am not changing the target. The full test runs in unit 8.
+- My short plain sentences never got the AI label on their own, but neither reached "human" either. Only the longer, more distinctive "Grandfather's kitchen" paragraph did (0.2377).
+- **A false positive on my own writing:** "What in the name of 'Sweet Home Alabama' was I forced to hear? I honestly do not know what that was." scored model 0.7905 and style 0.5173, combined 0.6539, and got the `ai` label. The signals differed by only 0.27, under the 0.35 limit, so the disagreement clamp never applied. The second sentence was written by an AI assistant, so this is a near-miss rather than a clean sample, but it is the Milestone 1 false positive in practice. The combining rule only protects writers when the signals disagree; it does nothing when both lean AI-like on short, plain text. I have not changed the thresholds. A candidate fix for unit 8 is requiring both signals to be at least 0.5 before the `ai` label can appear.
+- The AI texts (0.7369 and 0.7536) scored well above the human paragraph (0.2377), but only about 0.24 to 0.25 above the average of my two short sentences (0.5011). Criterion 2's target is 0.30 on 5 AI and 5 human pieces, and I have only a handful, so this is not a verdict. I am not changing the target. The full test runs in unit 8.
 - Neither signal returned the same number for everything, but the type-token ratio did nothing useful on this data (see above).
 
 ---
 
 ## Label Variants
 
-<!-- The exact text of all three labels, as a reader would see them, and the
-     score range each covers.
-
-     Write them for someone who has never heard the word "threshold". -->
-
-*PENDING (Milestone 5). Current `config.py` thresholds: human at or below 0.35, unsure 0.35 to 0.65, AI at or above 0.65.*
-
 | Label | Score range | The exact text a reader sees |
 |---|---|---|
-| high-confidence human |  |  |
-| unsure |  |  |
-| high-confidence AI |  |  |
+| high-confidence human | 0.00 – 0.35 | We think this was probably written by a person. This is an estimate, not a certainty. |
+| unsure | 0.35 – 0.65 | We can't tell whether this was written by a person or by an AI. That is not a judgment about your work, and plenty of people who write plainly get this result. If you would like it looked at, you can appeal. |
+| high-confidence AI | 0.65 – 1.00 | Our tools think this may have been written with AI, but they can get this wrong, especially with short or plainly written text. If you wrote it yourself, you can appeal and we will mark it for review. |
 
-**Why I worded the "unsure" one this way:**
+The labels are defined in `scoring.py` (`LABEL_HUMAN`, `LABEL_UNSURE`, `LABEL_AI`) and chosen by `scoring.py::score_to_label`. The ranges come from `scoring.label_ranges()`, which printed:
 
-*PENDING (Milestone 5).*
+```
+[('high-confidence human', '0.00 – 0.35'), ('unsure', '0.35 – 0.65'), ('high-confidence AI', '0.65 – 1.00')]
+```
+
+When the two signals disagree by more than 0.35, the combining rule clamps the score into 0.36 to 0.64, so a disagreement can only produce "unsure".
+
+**Why I worded the "unsure" one this way:** The person reading it may well have written every word, so it opens with what we can't know instead of what we suspect, and it says directly that it is not a judgment about their work. I added "plenty of people who write plainly get this result" because that is the honest reason it happens (signal one scores plain writing as machine-like), and it tells the reader the result isn't about them. It ends by pointing to the appeal. The AI label carries a hedge too, since my own short human sentences scored above the AI threshold on signal one alone.
+
+**Reachability check:**
+
+| Label | Reached by | combined | Source |
+|---|---|---|---|
+| ai | "implementation of the proposed framework" paragraph | 0.7536 | real `/submit` |
+| human | "Grandfather's kitchen" paragraph | 0.2377 | real `/submit` |
+| unsure | "What in the name of 'Sweet Home Alabama' did I just witness" | 0.5524 | real `/submit` (model 0.7047, style 0.4000) |
+
+All three labels are reachable. Plain short writing did not reach "human" on its own, and one short human-written input crossed into "ai". I did not move the thresholds to change either result.
 
 ---
 
 ## Sample Run
 
-**Before any submission** (the log is empty)
+**A submission** (this one returns the `unsure` label)
 
 ```powershell
-PS> curl.exe "http://127.0.0.1:5000/log"
+PS> $unsure2 = @{ text = "What in the name of 'Sweet Home Alabama' did I just witness"; creator_id = "me" } | ConvertTo-Json
+PS> $r = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:5000/submit -ContentType "application/json" -Body $unsure2
+```
+
+The response carried `content_id` `cba375b1-ad9c-40f9-a3f2-17c05ca869d7`, guess `unsure`, confidence 0.5524, model_score 0.7047 and style_score 0.4. An earlier identical submission returned this full response:
+
+```json
+{
+    "confidence":  0.5524,
+    "content_id":  "b4661c2f-ae4d-49a7-a5d2-960d14afd295",
+    "guess":  "unsure",
+    "label":  "We can't tell whether this was written by a person or by an AI. That is not a judgment about your work, and plenty of people who write plainly get this result. If you would like it looked at, you can appeal.",
+    "model_score":  0.7047,
+    "status":  "decided",
+    "style_score":  0.4
+}
+```
+
+**A submission that returns the AI label**
+
+```json
+{
+    "confidence":  0.7536,
+    "content_id":  "1dad6013-fca1-4668-b8f5-49823334032a",
+    "guess":  "ai",
+    "label":  "Our tools think this may have been written with AI, but they can get this wrong, especially with short or plainly written text. If you wrote it yourself, you can appeal and we will mark it for review.",
+    "model_score":  0.8864,
+    "status":  "decided",
+    "style_score":  0.6208
+}
+```
+
+(The text sent for this one contained a copy-paste typo, "awide", exactly as typed.)
+
+**A submission that returns the human label**
+
+```json
+{
+    "confidence":  0.2377,
+    "content_id":  "4921a6dd-495c-4372-ab14-12dcbd81cd6c",
+    "guess":  "human",
+    "label":  "We think this was probably written by a person. This is an estimate, not a certainty.",
+    "model_score":  0.2282,
+    "status":  "decided",
+    "style_score":  0.2472
+}
+```
+
+(Sent with a typo, "burntsugar", exactly as typed.)
+
+**An appeal**
+
+```powershell
+PS> $appeal = @{ content_id = $r.content_id; reasoning = "I wrote this myself." } | ConvertTo-Json
+PS> Invoke-RestMethod -Method Post -Uri http://127.0.0.1:5000/appeal -ContentType "application/json" -Body $appeal | ConvertTo-Json
 ```
 
 ```json
 {
-  "count": 0,
-  "entries": []
+    "content_id":  "cba375b1-ad9c-40f9-a3f2-17c05ca869d7",
+    "message":  "We received your appeal and marked this submission for review.",
+    "status":  "under_review"
 }
 ```
 
-**A submission**
+**What the log shows afterwards**
 
-*(Milestone 4 state: `model_score`, `style_score` and `confidence` are all real. The label text is still a placeholder until Milestone 5. `confidence` is the combined score, where higher means more likely AI.)*
+The original decision is unchanged and the appeal sits after it:
 
 ```powershell
-PS> $body = @{ text = "The implementation of the proposed framework requires careful consideration of several key factors. First, it is important to note that the system must be able to handle a wide variety of different inputs. Additionally, the overall performance of the solution depends on a number of important variables."; creator_id = "me" } | ConvertTo-Json
-PS> Invoke-RestMethod -Method Post -Uri http://127.0.0.1:5000/submit -ContentType "application/json" -Body $body | ConvertTo-Json
+PS> curl.exe "http://127.0.0.1:5000/log?limit=2"
 ```
 
 ```json
 {
-  "content_id": "8944c449-e06d-42ba-81f0-860e697d5a41",
-  "guess": "ai",
-  "confidence": 0.7536,
-  "label": "PLACEHOLDER — write the high-confidence AI label.",
-  "model_score": 0.8864,
-  "style_score": 0.6208,
-  "status": "decided"
+  "count": 2,
+  "entries": [
+    {
+      "combined_score": 0.5524,
+      "content_id": "cba375b1-ad9c-40f9-a3f2-17c05ca869d7",
+      "creator_id": "me",
+      "guess": "unsure",
+      "label": "We can't tell whether this was written by a person or by an AI. That is not a judgment about your work, and plenty of people who write plainly get this result. If you would like it looked at, you can appeal.",
+      "model_score": 0.7047,
+      "status": "decided",
+      "style_score": 0.4,
+      "timestamp": "2026-10-29T20:05:45+00:00"
+    },
+    {
+      "content_id": "cba375b1-ad9c-40f9-a3f2-17c05ca869d7",
+      "creator_id": "me",
+      "event": "appeal",
+      "reasoning": "I wrote this myself.",
+      "status": "under_review",
+      "timestamp": "2026-10-29T20:05:45+00:00"
+    }
+  ]
 }
 ```
 
-The combining rule gave (0.8864 + 0.6208) / 2 = 0.7536. The two signals differ by 0.27, under the 0.35 disagreement limit, so no clamp applied, and 0.7536 is above the 0.65 AI threshold, so the guess is `ai`.
+**An appeal against an id that doesn't exist**
+
+```powershell
+PS> $bad = @{ content_id = "not-a-real-id"; reasoning = "test" } | ConvertTo-Json
+PS> Invoke-RestMethod -Method Post -Uri http://127.0.0.1:5000/appeal -ContentType "application/json" -Body $bad
+```
+
+```json
+{
+  "error": "unknown_content_id",
+  "message": "We couldn't find a submission with that content_id. Check it matches the one you were given."
+}
+```
+
+This returned HTTP 404. (An earlier appeal attempt returned `501 not_implemented`, because the running service still had the starter's appeal stub. After I replaced `app.py::appeal` and restarted, it worked as shown.)
 
 **A rejected request**
 
-My first attempts sent the body through `curl.exe` from PowerShell, and the quoting mangled it, so Flask never received a JSON object. The service correctly refused each one with `invalid_body` and logged it. That is the bad-input path from criterion 5 working. These lines are from that earlier run (I cleared the log afterwards):
+My first attempts sent the body through `curl.exe` from PowerShell, and the quoting mangled it, so Flask never received a JSON object. The service refused each one with `invalid_body` and logged it. That is the bad-input path from criterion 5 working:
 
 ```jsonl
 {"timestamp": "2026-10-29T18:37:18+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "invalid_body"}
@@ -198,37 +286,6 @@ My first attempts sent the body through `curl.exe` from PowerShell, and the quot
 {"timestamp": "2026-10-29T19:14:49+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "invalid_body"}
 {"timestamp": "2026-10-29T19:15:32+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "invalid_body"}
 ```
-
-**An appeal**
-
-*PENDING (Milestone 5).*
-
-**What the log shows afterwards**
-
-```powershell
-PS> curl.exe "http://127.0.0.1:5000/log?limit=1"
-```
-
-```json
-{
-  "count": 1,
-  "entries": [
-    {
-      "combined_score": 0.7536,
-      "content_id": "8944c449-e06d-42ba-81f0-860e697d5a41",
-      "creator_id": "me",
-      "guess": "ai",
-      "label": "PLACEHOLDER — write the high-confidence AI label.",
-      "model_score": 0.8864,
-      "status": "decided",
-      "style_score": 0.6208,
-      "timestamp": "2026-10-29T19:47:12+00:00"
-    }
-  ]
-}
-```
-
-The log entry has the same `content_id` as the response, and it records both signal scores and the combined score.
 
 ---
 
@@ -257,18 +314,10 @@ The log entry has the same `content_id` as the response, and it records both sig
 **My limits:** ___ per minute, ___ per day
 
 **Why those numbers and not others:**
-<!-- Think about two people: a real writer submitting their own work a few
-     times an hour, and a script sending a thousand variations to map your
-     thresholds. Your numbers have to be liveable for the first and hostile to
-     the second. -->
 
-**What a caller counts as:** <!-- per address, or per creator_id? They fail
-differently — one script can look like a thousand callers, and one household
-can look like one. -->
+**What a caller counts as:**
 
 **The run of status codes when I pushed past it:**
-
-<!-- python run_attacks.py --flood 15 -->
 
 ```
 
@@ -278,14 +327,9 @@ can look like one. -->
 
 ## Attack Run — Before
 
-<!-- Every attack with its outcome and a held-or-broke mark.
-     `run_attacks.py --label before` produces the table. -->
-
 
 
 **Ten audit log entries from the run**
-
-<!-- Choose entries that show the interesting failures, not the ten easiest. -->
 
 ```json
 
@@ -299,8 +343,6 @@ whose work got caught by it:
 ---
 
 ## Run Log and Verdicts
-
-<!-- Your five criteria across three trials. `run_eval.py --label before`. -->
 
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
@@ -319,20 +361,6 @@ that produced it:
 
 **Diagnoses**
 
-<!-- For each miss AND each broken attack: the stage and the mechanism.
-
-     Your service has five stages: the route, signal one, signal two, the
-     combining rule, and the label mapping.
-
-     Not a diagnosis:  "The evasion attacks got through."
-     A diagnosis:      "Four evasion inputs got through. All four had typos
-                        added to AI-generated text. My second signal measures
-                        word variety, and typos raise word variety — so it read
-                        them as more human. My combining rule weights that
-                        signal at 0.6, so it dragged the whole score down."
-
-     Look for a pattern. Five failures on one signal is one problem, not five. -->
-
 
 
 ---
@@ -345,14 +373,9 @@ that produced it:
 
 ### Attack Run — After
 
-<!-- Same format. `run_attacks.py --label after` -->
-
 
 
 **Did it help, and how do I know:**
-
-<!-- Widening the unsure band usually fixes one problem and creates another.
-     Reporting that trade honestly is worth full credit. -->
 
 
 
@@ -360,50 +383,11 @@ that produced it:
 
 ## What's Still Broken
 
-<!-- For each attack still getting through and each criterion still missed:
-     what you'd do, and why you stopped. -->
-
 
 
 **The trade I'd make if this ran for real:**
 
-<!-- Two sentences. Fewer wrong accusations means more AI text getting through.
-     Say which way you'd go and WHO PAYS FOR IT. -->
 
-
-
-<!-- ═════════════════════════════════════════════════════════════════════
-
-     SUBMISSION CHECKLIST — unit 7
-
-       [ ] criteria.md has five numbered criteria, each naming a target
-       [ ] Each has a reason underneath
-       [ ] POST /submit returns content_id, guess, confidence, label,
-           model_score and style_score
-       [ ] Two signals that measure DIFFERENT things, each with a named blind spot
-       [ ] Three label variants, all reachable, written out in full
-       [ ] POST /appeal changes status and writes to the log
-       [ ] Signals and Scoring names scoring.py::combine_signals
-       [ ] Sample Run: a submission AND an appeal, as pasted text
-       [ ] At least four new commits
-       [ ] Repository URL submitted — WRITE IT DOWN
-
-     SUBMISSION CHECKLIST — unit 8
-
-       [ ] Rate limiting on /submit, with your numbers justified
-       [ ] The pasted run of status codes showing 429
-       [ ] Audit log with all nine fields, recording rejections too
-       [ ] The attack set run IN FULL, every input with an outcome
-       [ ] Ten audit log entries pasted as text
-       [ ] Five criteria across three trials
-       [ ] A diagnosis for every miss and every broken attack — stage AND mechanism
-       [ ] One improvement, with Attack Run — After
-       [ ] What's Still Broken, including the production trade
-       [ ] At least four new commits
-       [ ] The SAME repository URL as last unit
-
-     Do not delete and recreate this repository.
-     ═════════════════════════════════════════════════════════════════════ -->
 
 ---
 
