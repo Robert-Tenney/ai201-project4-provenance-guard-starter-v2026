@@ -31,6 +31,8 @@ from flask import Flask, jsonify, request
 import audit
 import config
 import detector
+import scoring
+import stylometry
 
 app = Flask(__name__)
 
@@ -174,12 +176,9 @@ def submit():
     Expects JSON:
         {"text": "...", "creator_id": "..."}
 
-    Milestone 3 state: ONE real signal (model_signal). The style score,
-    combined confidence and label are still placeholders.
-        - style_score: None            -> Milestone 4
-        - confidence:  None            -> Milestone 4
-        - label:       placeholder     -> Milestone 5
-    The keys are already in the response so the shape never changes later.
+    Milestone 4 state: both signals are real and combined into one score.
+    The label TEXT is still a placeholder from scoring.score_to_label until
+    Milestone 5; the guess (ai / human / unsure) is already real.
     """
     payload = request.get_json(silent=True)
 
@@ -223,15 +222,15 @@ def submit():
                        "The detector model isn't available right now.",
                        logged_creator)
 
-    # 5. Placeholders until Milestones 4 and 5.
+    # 5. Signal two, then the combining rule, then the guess.
+    style_score = stylometry.style_signal(text)
+    confidence = scoring.combine_signals(model_score, style_score)
+    guess, label = scoring.score_to_label(confidence)   # label text: Milestone 5
+
     content_id = str(uuid.uuid4())
-    style_score = None            # TODO Milestone 4
-    confidence = None             # TODO Milestone 4 (combined score)
-    guess = "pending"             # TODO Milestone 5
-    label = "PLACEHOLDER: label arrives in Milestone 5."
     status = "decided"
 
-    # 6. Log it. A file, not print().
+    # 6. Log it, with BOTH signal scores and the combined one.
     audit.log_decision(
         content_id=content_id,
         creator_id=creator_id,
@@ -258,32 +257,50 @@ def submit():
 @app.post("/appeal")
 def appeal():
     """
-    A writer says you got it wrong. ← TODO — Milestone 5
+    A writer says you got it wrong.
 
-    Expects JSON:
-        {"content_id": "...", "reasoning": "..."}
+    Expects JSON: {"content_id": "...", "reasoning": "..."}
 
-    Should:
-      1. Check the content_id actually exists — `audit.entries_for(id)` tells
-         you. A typo here fails silently and looks like a broken endpoint,
-         which is the single most common way this milestone eats an hour.
-      2. Record the appeal with `audit.log_appeal(...)`, which moves the item
-         to `under_review`.
-      3. Confirm to the writer. No automatic re-checking needed.
-
-    This is the smallest endpoint in the project and the one that matters most
-    to the person on the other end. It's the only thing standing between a
-    wrong accusation and nothing at all.
+    Validates the body, checks the content_id belongs to a real decision,
+    appends an appeal entry (status "under_review") beside the original, and
+    confirms. The log is append-only, so the original decision is untouched.
     """
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
 
-    # TODO: delete this and build the route.
+    if not isinstance(payload, dict):
+        return _reject(400, "invalid_body",
+                       "Send a JSON object with 'content_id' and 'reasoning'.")
+
+    content_id = payload.get("content_id")
+    reasoning = payload.get("reasoning")
+
+    if not isinstance(content_id, str) or not content_id.strip():
+        return _reject(400, "invalid_body",
+                       "'content_id' is required and must be a non-empty string.")
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return _reject(400, "invalid_body",
+                       "'reasoning' is required: tell us why you think this was wrong.")
+
+    content_id = content_id.strip()
+
+    # The original decision is the entry with no "event" field.
+    original = next((e for e in audit.entries_for(content_id) if "event" not in e), None)
+    if original is None:
+        return _reject(404, "unknown_content_id",
+                       "We couldn't find a submission with that content_id. "
+                       "Check it matches the one you were given.")
+
+    audit.log_appeal(
+        content_id=content_id,
+        creator_id=original.get("creator_id", "unknown"),
+        reasoning=reasoning.strip(),
+    )
+
     return jsonify({
-        "error": "not_implemented",
-        "message": "POST /appeal isn't built yet — see the TODO in app.py.",
-        "you_sent": payload,
-    }), 501
-
+        "content_id": content_id,
+        "status": "under_review",
+        "message": "We received your appeal and marked this submission for review.",
+    }), 200
 
 # ── Already works ─────────────────────────────────────────────────────────────
 
