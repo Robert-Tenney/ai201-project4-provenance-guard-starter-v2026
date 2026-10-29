@@ -42,63 +42,43 @@ Two things worth knowing before you pick numbers:
   a **miss**.
 
 ---
-## 1.
+## 1. False positives: at most 1 of 10 of my own pieces is labelled high-confidence AI
 
-<!-- Your criterion. It must name a number. -->
+Of 10 pieces I wrote myself (at least 3 of them plain, short-sentence writing like an email or a simple explanation), at most 1 gets the `ai` label (combined score above `AI_THRESHOLD`). This must hold in each of the three trials, not on average across them.
 
-
-
-**Why this target:**
-
-
+**Why this target:** On a writing site, a wrong accusation costs the writer far more than a missed detection costs the site, so this is the tightest number I set. I include plain writing on purpose, because signal one scores plain, common-word writing as machine-like. A test set of only ornate prose would let me hit the target without ever meeting the writers the system is most likely to accuse. I chose 1 of 10 rather than 0 because with a local model that scores the same text differently between runs, 0 would be a number I can't promise.
 
 ---
 
-## 2.
+## 2. Score spread: clearly-AI text scores at least 0.30 higher than clearly-human text
 
-<!-- Your criterion. -->
+Take 5 pieces I'm certain are AI-generated and 5 I'm certain a person wrote. The mean combined score of the AI group must be at least 0.30 above the mean of the human group, and at least 4 of the 5 AI pieces must score above 0.50.
 
-
-
-**Why this target:**
-
-
+**Why this target:** A system that scores everything near 0.5 is not detecting anything, however well-behaved it looks. 0.30 is wide enough that the unsure band (0.35 to 0.65) is a real middle rather than the only place anything lands. Requiring 4 of 5 AI pieces above 0.50 stops a large gap in the means from being produced by one extreme score.
 
 ---
 
-## 3.
+## 3. Label coverage: all three labels are reachable, and borderline text lands in "unsure"
 
-<!-- Your criterion. -->
+Across a set of 12 test inputs (4 clearly AI, 4 clearly human, 4 borderline), the labels `ai`, `human` and `unsure` each appear at least once. Of the 4 borderline pieces, at least 3 get `unsure`.
 
-
-
-**Why this target:**
-
-
+**Why this target:** A label nothing can reach is a gap in my ranges, and `config.py` already warns that a stub style signal makes the human label unreachable. Borderline text is where the system is most likely to be wrong, and "unsure" is the only label that admits it. If borderline text keeps getting a confident label, the thresholds are too narrow.
 
 ---
 
-## 4.
+## 4. The appeal path: every appeal changes status and is recorded, and nothing is overwritten
 
-<!-- Your criterion. -->
+For 10 appeals sent against real `content_id`s from earlier submissions: all 10 return HTTP 200 with `"status": "under_review"`. All 10 add exactly one new line to `logs/audit.jsonl` with `"event": "appeal"` and the writer's reasoning, and the original `decided` line for that content is unchanged. An appeal with an unknown `content_id` returns 404 and writes no appeal line.
 
-
-
-**Why this target:**
-
-
+**Why this target:** The appeal is the only thing between a wrong accusation and nothing at all, so it has to work every time and 10 of 10 is the only number that makes sense. Checking that the original line is untouched matters because the log is the evidence of what the system decided and when.
 
 ---
 
-## 5.
+## 5. Bad input: malformed requests never crash the service
 
-<!-- Your criterion. -->
+Send 6 bad requests: `text` missing, `text` empty, `text` whitespace only, `text` null, `text` of 50,000 words, and a JSON body that is a list instead of an object. All 6 return a 4xx response whose body is JSON with an `error` field, none returns a 500, each rejection leaves a line in the audit log, and `/ping` still answers afterwards.
 
-
-
-**Why this target:**
-
-
+**Why this target:** A crash on malformed input is one of the most common real failures, and the attack set next unit will send exactly these. A 500 means my handler never decided anything, so the writer gets no explanation. Requiring a log line for each rejection means a bad request can't happen without leaving a trace.
 
 ---
 
