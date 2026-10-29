@@ -30,8 +30,12 @@ from flask import Flask, jsonify, request
 
 import audit
 import config
+import detector
 
 app = Flask(__name__)
+
+# Input limit from design.md. Anything longer is refused with a 413.
+MAX_TEXT_CHARS = 20_000
 
 
 # ── Rate limiting — UNIT 8 ────────────────────────────────────────────────────
@@ -150,66 +154,105 @@ def health():
 
 # ── YOU BUILD THIS ────────────────────────────────────────────────────────────
 
+def _reject(status_code, error, message, creator_id="unknown"):
+    """
+    Refuse a request: log the rejection, answer with the contract's error shape.
+
+    An input that is refused and leaves no trace is exactly the kind of thing
+    that can't be diagnosed later.
+    """
+    audit.log_rejection(creator_id=creator_id, reason=error)
+    return jsonify({"error": error, "message": message}), status_code
+
+
 @app.post("/submit")
 # @limiter.limit(f"{config.RATE_LIMIT_PER_MINUTE}/minute;{config.RATE_LIMIT_PER_DAY}/day")
 def submit():
     """
     Take a piece of text, decide about it, log the decision, answer.
-    ← TODO — Milestones 3, 4 and 5
 
     Expects JSON:
         {"text": "...", "creator_id": "..."}
 
-    Should return JSON with, at minimum:
-        {"content_id": "...", "guess": "...", "confidence": 0.0, "label": "...",
-         "model_score": 0.0, "style_score": 0.0}
-
-    ⚠️ **Both signal scores go in the response, not just the log.** Unit 8's
-    `run_attacks.py` and `run_eval.py` read `model_score` and `style_score`
-    straight off this response and put them in your reports. Leave them out and
-    every row of next unit's evidence says `null` — which is exactly the
-    diagnostic you need to name a stage and a mechanism. You do not want to
-    find that out after running the attack set.
-
-    ─────────────────────────────────────────────────────────────────────────
-    Build it in three passes. Do not skip ahead — the ordering is how you tell
-    a broken route from a broken signal.
-
-    **Milestone 3 — the route answers.**
-      1. Return a hardcoded response. Confirm `curl` gets it back before you
-         add any logic at all.
-      2. Then pull `text` and `creator_id` out of the payload.
-      3. Then call ONE signal — `detector.model_signal(text)` — and put the
-         real number in. Leave confidence and label as placeholders.
-      4. Log every submission with `audit.log_decision(...)`. The content_id
-         matters: `/appeal` needs it, and a student who skips it rebuilds this
-         whole flow later.
-
-    **Milestone 4 — the second signal and the score.**
-      5. Add `stylometry.style_signal(text)`.
-      6. Combine them with `scoring.combine_signals(...)`.
-      7. Log BOTH signal scores alongside the combined one, and put them in the
-         response too. Next unit you can't diagnose anything without them.
-
-    **Milestone 5 — the label.**
-      8. `scoring.score_to_label(...)` and put the real label in the response.
-
-    ─────────────────────────────────────────────────────────────────────────
-    Worth deciding early, because unit 8's attack set will decide it for you:
-    what should this do when `text` is missing, empty, or enormous? A crash on
-    a malformed input is one of the most common real failures there is.
+    Milestone 3 state: ONE real signal (model_signal). The style score,
+    combined confidence and label are still placeholders.
+        - style_score: None            -> Milestone 4
+        - confidence:  None            -> Milestone 4
+        - label:       placeholder     -> Milestone 5
+    The keys are already in the response so the shape never changes later.
     """
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
 
-    # TODO: delete this and build the route.
+    # 1. The body has to be a JSON object.
+    if not isinstance(payload, dict):
+        return _reject(400, "invalid_body",
+                       "Send a JSON object with 'text' and 'creator_id'.")
+
+    text = payload.get("text")
+    creator_id = payload.get("creator_id")
+
+    # Use the creator_id in the rejection log only if it is a usable string.
+    logged_creator = creator_id if isinstance(creator_id, str) and creator_id.strip() else "unknown"
+
+    # 2. creator_id: required, non-empty string.
+    if not isinstance(creator_id, str) or not creator_id.strip():
+        return _reject(400, "invalid_creator_id",
+                       "'creator_id' is required and must be a non-empty string.",
+                       logged_creator)
+
+    # 3. text: required, non-empty string, under the length cap.
+    if not isinstance(text, str) or not text.strip():
+        return _reject(400, "invalid_text",
+                       "'text' is required and must be a non-empty string.",
+                       logged_creator)
+    if len(text) > MAX_TEXT_CHARS:
+        return _reject(413, "text_too_long",
+                       f"'text' must be {MAX_TEXT_CHARS:,} characters or fewer.",
+                       logged_creator)
+
+    # 4. Signal one. Both failure modes are the caller's or the host's problem,
+    #    not a crash.
+    try:
+        model_score = detector.model_signal(text)
+    except ValueError:
+        return _reject(422, "text_too_short",
+                       "That text is too short to score. Try a few sentences.",
+                       logged_creator)
+    except detector.DetectorUnavailable:
+        return _reject(503, "detector_unavailable",
+                       "The detector model isn't available right now.",
+                       logged_creator)
+
+    # 5. Placeholders until Milestones 4 and 5.
+    content_id = str(uuid.uuid4())
+    style_score = None            # TODO Milestone 4
+    confidence = None             # TODO Milestone 4 (combined score)
+    guess = "pending"             # TODO Milestone 5
+    label = "PLACEHOLDER: label arrives in Milestone 5."
+    status = "decided"
+
+    # 6. Log it. A file, not print().
+    audit.log_decision(
+        content_id=content_id,
+        creator_id=creator_id,
+        guess=guess,
+        model_score=model_score,
+        style_score=style_score,
+        combined_score=confidence,
+        label=label,
+        status=status,
+    )
+
+    # 7. Answer with the full contract shape.
     return jsonify({
-        "error": "not_implemented",
-        "message": "POST /submit isn't built yet — see the TODO in app.py.",
-        "you_sent": {
-            "text_length": len(payload.get("text", "")),
-            "creator_id": payload.get("creator_id"),
-        },
-    }), 501
+        "content_id": content_id,
+        "guess": guess,
+        "confidence": confidence,
+        "label": label,
+        "model_score": model_score,
+        "style_score": style_score,
+        "status": status,
+    }), 200
 
 
 @app.post("/appeal")
