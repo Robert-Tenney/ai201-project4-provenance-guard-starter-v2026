@@ -36,12 +36,17 @@
 
 ## What This Does
 
-<!-- The path a submission takes, from arriving to the label a reader sees.
-     Six or seven steps — this is the trace you wrote in Milestone 1. -->
+## What This Does
 
+A submission takes this path:
 
-
----
+1. **Arrives at `POST /submit`** (`app.py::submit`), which validates it: JSON object, non-empty `text` under the length cap, non-empty `creator_id`. Bad input gets a clear 4xx error and a logged rejection, never a crash.
+2. **Signal one** (`detector.py::model_signal`) runs gpt2 locally and adds a 0-1 score for how predictable the text is.
+3. **Signal two** (`stylometry.py::style_signal`) adds a 0-1 score for the shape of the text: sentence-length spread, vocabulary repetition, and punctuation.
+4. **The combining rule** (`scoring.py::combine_signals`) turns the two scores into one combined score.
+5. **Labelling** (`scoring.py::score_to_label`) maps that score to a guess (`ai`, `human`, or `unsure`) and a plain-language sentence for the reader.
+6. **The audit log** (`audit.py::log_decision`) appends a JSON line to `logs/audit.jsonl` with the content id, creator id, both signal scores, the combined score, the label, and status `decided`.
+7. **The response** returns the `content_id`, guess, confidence, label, and both signal scores. If the writer disagrees, `POST /appeal` with that `content_id` sets the status to `under_review` and records their reasoning next to the original decision.
 
 ## Signals and Scoring
 
