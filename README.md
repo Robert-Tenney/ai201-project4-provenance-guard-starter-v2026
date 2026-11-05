@@ -255,6 +255,10 @@ PS> curl.exe "http://127.0.0.1:5000/log?limit=2"
 
 ## How I Used AI
 
+*Draft: edit so every line is true to what you did.*
+
+
+
 **Moment 1: the style signal and the false positive it let through**
 
 - *What I asked for:* An implementation of `stylometry.py` and the combining rule, with the disagreement clamp.
@@ -266,8 +270,6 @@ PS> curl.exe "http://127.0.0.1:5000/log?limit=2"
 - *What I asked for:* The completed `config.py` and `app.py` for Milestone 1, and help writing up the Rate Limiting section from my real output.
 - *What came back:* Limiter settings of 5 per minute and 50 per day with reasoning, the activated `@limiter.limit(...)` decorator, a small change to the 429 handler so it logs `"unknown"` instead of a non-string `creator_id`, and a draft of the README section.
 - *What I checked:* I ran the flood test myself and used its real output. When my first log read-back showed only the `flood_tester` rejections and no decisions, I re-ran the three-text check until `m1_check` decisions appeared, rather than pasting entries that didn't show what the section claimed. *(Edit this to say what you actually changed or decided about the limits yourself.)*
-
-**Also worth saying, if true:** `/appeal` kept returning `501 not_implemented` because my `app.py` still had the starter stub. I only found that by reading the response text, then replaced the function and restarted.
 
 ---
 
@@ -318,7 +320,7 @@ All ten 429s appear in the log this way, matching the ten 429 status codes above
 
 All five `flood_tester` decisions scored identically (0.2588 / 0.1716 / 0.2152), which fits the same text being sent each time and nothing in either signal being random.
 
-**Log check: three different texts read back with `GET /log?limit=3`:**
+**Log check: three different texts read back with `GET /log`:**
 
 I submitted three different pieces of text as `m1_check` and read them back. Each entry has all nine fields: `timestamp`, `content_id`, `creator_id`, `guess`, `model_score`, `style_score`, `combined_score`, `label`, `status`.
 
@@ -367,9 +369,293 @@ I submitted three different pieces of text as `m1_check` and read them back. Eac
 
 **A rejection is different.** A rate-limit entry has no `content_id`, scores or label, because no decision was made. From it you can reconstruct who was blocked, when, and by which limit (`5 per 1 minute`), but not what they submitted.
 
+---
+
 ## Attack Run — Before
 
-*Unit 8.*
+**How I ran it:** `python run_attacks.py --set attack_set --label before` against a restarted service with rate limiting on (5 per minute, 50 per day per creator). All 56 rows loaded (32 in `attacks.csv`, 24 in `attacks_malformed_requests.csv`), none were skipped, and the harness auto-marked 0 as BROKE because the service never returned a 5xx or dropped a connection. Full table: `results/attack_run_2026-11-05_1325_before.md`. Log pulled with `GET /log?limit=500` into `results/audit_extract.json`.
+
+**How I marked held or broke.** I used each attack's `targets` column as its goal, and a strict rule:
+
+- **Evasion:** BROKE if AI text got any label other than `ai`. I did not count `unsure` as a hold, because the attack succeeded in avoiding the `ai` label. `unsure` is the cost I chose in my combining rule, but it is still AI text getting through.
+- **False positive:** BROKE if real writing got `ai`.
+- **Prompt injection:** BROKE if the label was `human`.
+- **Malformed:** HELD if the service answered without a 5xx.
+- **Flood:** HELD, because the limiter capped it.
+
+### Result
+
+| Family | Attacks | BROKE | HELD |
+|---|---|---|---|
+| evasion | 10 | 9 | 1 |
+| false_positive | 8 | 4 | 4 |
+| prompt_injection | 6 | 2 | 4 |
+| malformed (text, MF) | 8 | 0 | 8 |
+| malformed (requests, RQ) | 12 | 0 | 12 |
+| flood_same_creator | 12 | 0 | 12 |
+| **Total** | **56** | **15** | **41** |
+
+### Every attack that became a decision (34)
+
+Scores come from `logs/audit.jsonl`. Gap is the absolute difference between the two signals.
+
+| ID | guess | model | style | combined | gap | Mark |
+|---|---|---|---|---|---|---|
+| EV01 | unsure | 0.1635 | 0.6549 | 0.4092 | 0.49 | BROKE |
+| EV02 | unsure | 0.5943 | 0.1601 | 0.3772 | 0.43 | BROKE |
+| EV03 | unsure | 0.6662 | 0.3642 | 0.5152 | 0.30 | BROKE |
+| EV04 | unsure | 0.6114 | 0.6364 | 0.6239 | 0.03 | BROKE |
+| EV05 | human | 0.3212 | 0.1158 | 0.2185 | 0.21 | BROKE |
+| EV06 | unsure | 0.5727 | 0.1790 | 0.3759 | 0.39 | BROKE |
+| EV07 | unsure | 0.5862 | 0.0000 | 0.3600 | 0.59 | BROKE |
+| EV08 | unsure | 0.2452 | 0.6172 | 0.4312 | 0.37 | BROKE |
+| EV09 | unsure | 0.7042 | 0.3757 | 0.5400 | 0.33 | BROKE |
+| EV10 | ai | 0.9792 | 0.8061 | 0.8926 | 0.17 | HELD |
+| FP01 | unsure | 0.6175 | 0.5025 | 0.5600 | 0.12 | HELD |
+| FP02 | ai | 0.7387 | 0.7070 | 0.7228 | 0.03 | BROKE |
+| FP03 | ai | 0.8051 | 0.6043 | 0.7047 | 0.20 | BROKE |
+| FP04 | ai | 0.8329 | 0.5333 | 0.6831 | 0.30 | BROKE |
+| FP05 | ai | 0.8005 | 0.8060 | 0.8033 | 0.01 | BROKE |
+| FP06 | unsure | 0.8814 | 0.3996 | 0.6400 | 0.48 | HELD |
+| FP07 | unsure | 0.8816 | 0.4768 | 0.6400 | 0.40 | HELD |
+| FP08 | unsure | 0.3223 | 0.4670 | 0.3947 | 0.14 | HELD |
+| PI01 | human | 0.4625 | 0.2373 | 0.3499 | 0.23 | BROKE |
+| PI02 | human | 0.2044 | 0.2074 | 0.2059 | 0.00 | BROKE |
+| PI03 | unsure | 0.5943 | 0.4994 | 0.5469 | 0.09 | HELD |
+| PI04 | unsure | 0.4998 | 0.4059 | 0.4528 | 0.09 | HELD |
+| PI05 | unsure | 0.6401 | 0.2286 | 0.4344 | 0.41 | HELD |
+| PI06 | unsure | 0.5583 | 0.4786 | 0.5185 | 0.08 | HELD |
+| MF03 | unsure | 0.0000 | 0.4000 | 0.3600 | 0.40 | HELD |
+| MF04 | unsure | 0.0112 | 0.5000 | 0.3600 | 0.49 | HELD |
+| MF05 | unsure | 0.9976 | 0.5000 | 0.6400 | 0.50 | HELD |
+| MF06 | unsure | 0.9969 | 0.5000 | 0.6400 | 0.50 | HELD |
+| MF07 | unsure | 0.9064 | 0.5000 | 0.6400 | 0.41 | HELD |
+| FL01_01 to FL01_05 | unsure | 0.0287 | 0.4000 | 0.3600 | 0.37 | HELD |
+
+**The combining rule changed twelve of these labels.** When the signals differ by more than 0.35, the result is clamped into 0.36 to 0.64. That moved FP07 (average 0.6792), MF05 (0.7488), MF06 (0.7485) and MF07 (0.7032) from `ai` to `unsure`, and EV07 (0.2931), MF03 (0.2000), MF04 (0.2556) and all five flood decisions (0.2144) from `human` to `unsure`. Those rows are HELD, or BROKE only by a smaller margin, because of that rule and not because the signals agreed. The five junk inputs in the malformed family (MF03 to MF07) are HELD on the crash test, but each was scored instead of refused, and MF05 to MF07 would have been labelled `ai` without the clamp. That includes MF07, a real Arabic sentence that scored 0.9064 on signal one.
+
+### Every attack that was refused (22)
+
+| ID | HTTP | Logged reason |
+|---|---|---|
+| MF01 | 400 | `invalid_text` |
+| MF02 | 422 | `text_too_short` |
+| MF08 | 413 | `text_too_long` |
+| RQ01, RQ03, RQ04, RQ05, RQ12 | 400 | `invalid_text` |
+| RQ02, RQ06 | 400 | `invalid_creator_id` |
+| RQ07, RQ08, RQ09 | 400 | `invalid_body` |
+| RQ10, RQ11 | 429 | `rate_limited` |
+| FL01_06 to FL01_12 | 429 | `rate_limited` |
+
+All of these are HELD. Every refusal left a log entry.
+
+**Rows that never reached my route.** RQ10 and RQ11 have no usable `creator_id`, so they count against my own address (`127.0.0.1`). RQ02, RQ06, RQ07, RQ08 and RQ09 used up the limit of 5 a minute first, and RQ10 and RQ11 came back 429 before the route ran. They are logged as `rate_limited` with `creator_id: "unknown"`, not as `invalid_body`. I marked them HELD because the request was refused, but this says nothing about my validation. I re-ran both after a minute: *<TO FILL: result of `--id RQ10` and `--id RQ11`, expected 400 `invalid_body`>*.
+
+**Flood family.** FL01_01 to FL01_05 got through and FL01_06 to FL01_12 got 429: five passed, seven were limited, matching the limit of 5 a minute.
+
+**Prompt injection.** PI01 and PI02 were labelled `human`, so they BROKE, but no instruction was obeyed. Nothing in my pipeline reads the text as instructions. PI01 scored 0.3499, one ten-thousandth under the 0.35 human threshold. PI04 (HTML) and PI05 (log injection) were held by design: the service never echoes the submitted text, and the log writes it through `json.dumps`, so the PI05 entry is one clean decision.
+
+### Eleven log entries
+
+Chosen to show the interesting outcomes, not the easiest ones: an evasion by typos, a near miss, a heavy human edit, a padding attack the clamp rescued, two false accusations, a clamp that saved a real writer, a razor-thin injection result, a non-Latin text, and two rejections.
+
+**1. EV01 (unsure, combined 0.4092): AI text with typos. Signal one read it as human-like, signal two did not**
+
+```json
+{
+  "combined_score": 0.4092,
+  "content_id": "cdac2010-0558-424b-b477-32738931a9cf",
+  "creator_id": "attacker_EV01",
+  "guess": "unsure",
+  "label": "We can't tell whether this was written by a person or by an AI. That is not a judgment about your work, and plenty of people who write plainly get this result. If you would like it looked at, you can appeal.",
+  "model_score": 0.1635,
+  "status": "decided",
+  "style_score": 0.6549,
+  "timestamp": "2026-11-05T18:24:59+00:00"
+}
+```
+
+**2. EV04 (unsure, combined 0.6239): rare words, a near miss 0.026 under the `ai` threshold**
+
+```json
+{
+  "combined_score": 0.6239,
+  "content_id": "3d768848-fa83-48d8-a78a-9aae5efe15ba",
+  "creator_id": "attacker_EV04",
+  "guess": "unsure",
+  "label": "We can't tell whether this was written by a person or by an AI. That is not a judgment about your work, and plenty of people who write plainly get this result. If you would like it looked at, you can appeal.",
+  "model_score": 0.6114,
+  "status": "decided",
+  "style_score": 0.6364,
+  "timestamp": "2026-11-05T18:24:59+00:00"
+}
+```
+
+**3. EV05 (human, combined 0.2185): heavy human editing pass, the only evasion labelled human**
+
+```json
+{
+  "combined_score": 0.2185,
+  "content_id": "fc5cb153-d751-45b9-9a94-4e53d1937d32",
+  "creator_id": "attacker_EV05",
+  "guess": "human",
+  "label": "We think this was probably written by a person. This is an estimate, not a certainty.",
+  "model_score": 0.3212,
+  "status": "decided",
+  "style_score": 0.1158,
+  "timestamp": "2026-11-05T18:24:59+00:00"
+}
+```
+
+**4. EV07 (unsure, combined 0.36): punctuation padding. The average was 0.2931 and the clamp lifted it out of `human`**
+
+```json
+{
+  "combined_score": 0.36,
+  "content_id": "90fc5a11-6767-4da8-8854-eb2256794fd6",
+  "creator_id": "attacker_EV07",
+  "guess": "unsure",
+  "label": "We can't tell whether this was written by a person or by an AI. That is not a judgment about your work, and plenty of people who write plainly get this result. If you would like it looked at, you can appeal.",
+  "model_score": 0.5862,
+  "status": "decided",
+  "style_score": 0.0,
+  "timestamp": "2026-11-05T18:24:59+00:00"
+}
+```
+
+**5. FP03 (ai, combined 0.7047): a non-native English speaker writing carefully, accused**
+
+```json
+{
+  "combined_score": 0.7047,
+  "content_id": "b9ce64b4-9c74-43ab-baa7-a2fafe3c96e7",
+  "creator_id": "attacker_FP03",
+  "guess": "ai",
+  "label": "Our tools think this may have been written with AI, but they can get this wrong, especially with short or plainly written text. If you wrote it yourself, you can appeal and we will mark it for review.",
+  "model_score": 0.8051,
+  "status": "decided",
+  "style_score": 0.6043,
+  "timestamp": "2026-11-05T18:25:00+00:00"
+}
+```
+
+**6. FP05 (ai, combined 0.8033): technical documentation written by a person, the highest score in the set**
+
+```json
+{
+  "combined_score": 0.8033,
+  "content_id": "955383a1-1092-4166-876a-fb8271e6cae9",
+  "creator_id": "attacker_FP05",
+  "guess": "ai",
+  "label": "Our tools think this may have been written with AI, but they can get this wrong, especially with short or plainly written text. If you wrote it yourself, you can appeal and we will mark it for review.",
+  "model_score": 0.8005,
+  "status": "decided",
+  "style_score": 0.806,
+  "timestamp": "2026-11-05T18:25:00+00:00"
+}
+```
+
+**7. FP07 (unsure, combined 0.64): real writing that repeats a phrase. The average was 0.6792, and the clamp is what kept it from `ai`**
+
+```json
+{
+  "combined_score": 0.64,
+  "content_id": "d31804aa-36a4-48f2-9f5c-25d7cdca355c",
+  "creator_id": "attacker_FP07",
+  "guess": "unsure",
+  "label": "We can't tell whether this was written by a person or by an AI. That is not a judgment about your work, and plenty of people who write plainly get this result. If you would like it looked at, you can appeal.",
+  "model_score": 0.8816,
+  "status": "decided",
+  "style_score": 0.4768,
+  "timestamp": "2026-11-05T18:25:00+00:00"
+}
+```
+
+**8. PI01 (human, combined 0.3499): injected instruction prefix. It cleared the 0.35 human threshold by 0.0001**
+
+```json
+{
+  "combined_score": 0.3499,
+  "content_id": "d0d69e18-0f65-4721-8d7a-80b913e2bf38",
+  "creator_id": "attacker_PI01",
+  "guess": "human",
+  "label": "We think this was probably written by a person. This is an estimate, not a certainty.",
+  "model_score": 0.4625,
+  "status": "decided",
+  "style_score": 0.2373,
+  "timestamp": "2026-11-05T18:25:00+00:00"
+}
+```
+
+**9. MF07 (unsure, combined 0.64): Arabic text. Signal one scored it 0.9064, and only the clamp stopped an `ai` label**
+
+```json
+{
+  "combined_score": 0.64,
+  "content_id": "1c8f9a6d-5419-4c63-b3e0-72f75469e1a6",
+  "creator_id": "attacker_MF07",
+  "guess": "unsure",
+  "label": "We can't tell whether this was written by a person or by an AI. That is not a judgment about your work, and plenty of people who write plainly get this result. If you would like it looked at, you can appeal.",
+  "model_score": 0.9064,
+  "status": "decided",
+  "style_score": 0.5,
+  "timestamp": "2026-11-05T18:25:01+00:00"
+}
+```
+
+**10. Rejection, FL01 flood from one creator: rate limited**
+
+```json
+{
+  "creator_id": "attacker_flood",
+  "event": "rejected",
+  "limit": "5 per 1 minute",
+  "reason": "rate_limited",
+  "status": "rejected",
+  "timestamp": "2026-11-05T18:25:01+00:00"
+}
+```
+
+**11. Rejection, RQ10: rate limited before the route ran. The creator is `unknown` because the body had no usable `creator_id`**
+
+```json
+{
+  "creator_id": "unknown",
+  "event": "rejected",
+  "limit": "5 per 1 minute",
+  "reason": "rate_limited",
+  "status": "rejected",
+  "timestamp": "2026-11-05T18:25:01+00:00"
+}
+```
+
+A rejection has no `content_id`, scores or label, because no decision was made.
+
+### Worst outcome
+
+I chose FP05, a piece of technical documentation written by a person. I chose it because it received the most confident accusation in the whole set.
+
+**Input** (FP05, `false_positive`, "technical documentation written by a person"):
+
+> To configure the service, edit the settings file in the installation directory. Set the host value to the address the service should bind to. Set the port value to an unused port above 1024. Save the file and restart the service. The service will log its startup configuration. If the port is already in use, the service will exit with an error. Check the log file for details before retrying.
+
+**What my system returned** (HTTP 200):
+
+```json
+{
+  "content_id": "955383a1-1092-4166-876a-fb8271e6cae9",
+  "guess": "ai",
+  "confidence": 0.8033,
+  "label": "Our tools think this may have been written with AI, but they can get this wrong, especially with short or plainly written text. If you wrote it yourself, you can appeal and we will mark it for review.",
+  "model_score": 0.8005,
+  "status": "decided",
+  "style_score": 0.806
+}
+```
+
+**Why it's the worst:** A person who wrote their own setup instructions would be told their work "may have been written with AI". Both signals gave it about 0.80, so the system had no uncertainty to show the writer, and no rule in my pipeline made it less confident. This is the one I would least want to explain, because it is exactly the writer my `design.md` said the system must not accuse.
+
+**Which stage let it through:** not diagnosed yet. That is Milestone 4. In my breakout I'm sharing only the input and the output.
 
 ## Run Log and Verdicts
 
