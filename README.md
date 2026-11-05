@@ -109,7 +109,7 @@ All three run "higher = more human", so `style_signal` flips each onto a 0-1 "AI
 
 **Where the rule failed:** "What in the name of 'Sweet Home Alabama' was I forced to hear? I honestly do not know what that was." scored model 0.7905 and style 0.5173, combined 0.6539, and got the `ai` label. The signals differed by only 0.27, so the clamp never applied. (The second sentence was written by an AI assistant for testing, so this is a near-miss rather than a clean sample.) The rule only protects writers when the signals disagree; it does nothing when both lean AI-like on short, plain text. I have not moved the thresholds. A candidate fix for unit 8 is requiring both signals to be at least 0.5 before the `ai` label can appear.
 
-**Against my criteria:** Criterion 2 asks for AI text to score at least 0.30 above human text. Against my two short human sentences the gap is about 0.24 to 0.25; against the longer human paragraph it is about 0.5. I have only a handful of inputs, not the 5 and 5 the criterion specifies, so this is not a verdict, and I am not changing the target.
+**Against my criteria:** Criterion 2 asks for AI text to score at least 0.30 above human text. Against my two short human sentences the gap is about 0.24 to 0.25; against the longer human paragraph it is about 0.5. That early check used only a handful of inputs; the full 5-and-5 run is in the Run Log below.
 
 ---
 
@@ -257,19 +257,38 @@ PS> curl.exe "http://127.0.0.1:5000/log?limit=2"
 
 *Draft: edit so every line is true to what you did.*
 
+**Moment 1: acceptance criteria and design notes**
 
+- *What I asked for:* Help with the Milestone 1 trace and the Milestone 2 acceptance criteria.
+- *What came back:* A full `design.md` and five complete criteria with numbers and reasons.
+- *What I changed:* The brief says criteria should be my own, so I reviewed each one, asking whether someone who couldn't ask me could check it. *(Edit this to say what you actually changed, such as a number you adjusted or a reason you rewrote. If you changed nothing, say so plainly.)*
 
-**Moment 1: the style signal and the false positive it let through**
+**Moment 2: the style signal and the false positive it let through**
 
 - *What I asked for:* An implementation of `stylometry.py` and the combining rule, with the disagreement clamp.
 - *What came back:* Three measures with starting-guess scale endpoints, and a rule that clamps to "unsure" when the signals split.
 - *What I changed:* Nothing in the code, but running it showed problems the starting guesses hid. Type-token ratio did almost nothing (the AI paragraph scored 0.753, at the human end of my scale), and a human sentence plus one extra sentence scored 0.6539 and was labelled `ai`, because the clamp only fires when the signals disagree. I recorded both as findings instead of moving the thresholds, and noted a "both signals at least 0.5" rule as a fix to try in unit 8.
 
-**Moment 2 (unit 8, Milestone 1): rate limiting and the README write-up**
+**Moment 3 (unit 8, Milestone 1): rate limiting and the README write-up**
 
 - *What I asked for:* The completed `config.py` and `app.py` for Milestone 1, and help writing up the Rate Limiting section from my real output.
 - *What came back:* Limiter settings of 5 per minute and 50 per day with reasoning, the activated `@limiter.limit(...)` decorator, a small change to the 429 handler so it logs `"unknown"` instead of a non-string `creator_id`, and a draft of the README section.
 - *What I checked:* I ran the flood test myself and used its real output. When my first log read-back showed only the `flood_tester` rejections and no decisions, I re-ran the three-text check until `m1_check` decisions appeared, rather than pasting entries that didn't show what the section claimed. *(Edit this to say what you actually changed or decided about the limits yourself.)*
+
+**Moment 4 (unit 8, Milestone 2): running the attack set**
+
+- *What I asked for:* Help preparing the attack run, and two small helper scripts, `fill_verdicts.py` and `m2_extract.py`, to fill the Verdict column and pull scores out of my own `audit_extract.json`.
+- *What came back:* Predictions before I ran it, built from my code and a local run of `stylometry.py`. Most were right: the route's 400/413/422 responses, five of twelve flood rows passing, and RQ10 and RQ11 hitting 429 before my route ran. Two were wrong. I expected EV01 (typos) and EV04 (rare words) to be caught, and both came back `unsure`. EV01's typos moved signal one, not signal two as I assumed.
+- *What I decided myself:* *(Edit this. For example: which verdict rule I used for "unsure", why MF03 to MF07 count as held, why I chose FP05 as the worst outcome. The cause of the worst outcome is mine to work out in Milestone 4.)*
+
+**Moment 5 (unit 8, Milestone 3): running my own five criteria**
+
+- *What I asked for:* A `scenarios.py` for my five criteria and a way to test the two that `run_eval.py` can't (the appeal path and bad input).
+- *What came back:* A filled `scenarios.py` with five AI texts and four borderline texts written by the assistant, and a new `run_checks.py` that submits, appeals, reads the log back and checks the bad-input requests. The ten pieces of my own writing were left for me, because criterion 1 is only meaningful with writing I did myself.
+- *What went wrong:* The first copy of `run_checks.py` I saved was incomplete, and Python stopped with a `SyntaxError` at line 296. I replaced it with the full file and it ran. The assistant also told me all three labels had appeared in my criterion 3 set, which was wrong: `human` never appeared in those 12 inputs. I caught it by reading my own run output.
+- *What I decided myself:* *(Edit this. For example: which ten pieces I used and why pieces 1 to 3 are the plain ones, and whether I agree the borderline texts are borderline.)*
+
+**Also worth saying, if true:** `/appeal` kept returning `501 not_implemented` because my `app.py` still had the starter stub. I only found that by reading the response text, then replaced the function and restarted.
 
 ---
 
@@ -657,9 +676,95 @@ I chose FP05, a piece of technical documentation written by a person. I chose it
 
 **Which stage let it through:** not diagnosed yet. That is Milestone 4. In my breakout I'm sharing only the input and the output.
 
+---
+
 ## Run Log and Verdicts
 
-*Unit 8.*
+**How I ran it:** `scenarios.py` holds what each of my five criteria needs. `run_eval.py` runs three of them (criteria 1, 2, 3 and the five dict-shaped bad inputs of 5) three times. `run_checks.py` runs criteria 4 and 5 in full, three times, because `run_eval.py` only sends `/submit`: the appeal path needs a submission and then an appeal against its real `content_id`, and bad input needs a JSON list body and a log check, which `run_eval.py` can't express. I wrote `run_checks.py` as an extension for that reason. Everything was run against the same service as the attack run, with `python run_eval.py --label before` and `python run_checks.py --label before`.
+
+Reports: `results/run_2026-11-05_1407_before.md` and `results/checks_2026-11-05_1412_before.md`.
+
+**What each scenario contained.** Criterion 1: ten pieces I wrote myself (pieces 1 to 3 plain, short-sentence writing). Criterion 2: five AI texts and my pieces 1, 3, 5, 7, 9. Criterion 3: four AI texts, my pieces 2, 4, 6, 8, and four borderline texts. I fixed those splits before running so I couldn't choose pieces after seeing scores. The AI texts and the borderline texts were written by an AI assistant for this test; the borderline ones are AI-style drafts with human-style edits.
+
+### Run log
+
+Verdicts are left blank. I decide MET or MISSED in Milestone 4. The Run cells below hold what came back; the label counts are real output. Cells marked TO FILL need the scores from the report.
+
+| Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
+|---|---|---|---|---|---|
+| 1. False positives | At most 1 of 10 of my pieces labelled `ai`, in each trial | 0 `ai`, 2 `human`, 8 `unsure` | 0 `ai`, 2 `human`, 8 `unsure` | 0 `ai`, 2 `human`, 8 `unsure` | |
+| 2. Score spread | AI mean at least 0.30 above human mean, and at least 4 of 5 AI texts above 0.50 | AI: 2 `ai`, 3 `unsure`; human: 2 `human`, 3 `unsure`. Means and scores: *TO FILL* | same labels. *TO FILL* | same labels. *TO FILL* | |
+| 3. Label coverage | `ai`, `human` and `unsure` each appear in the 12 inputs; at least 3 of 4 borderline get `unsure` | AI: 2 `ai`, 2 `unsure`; human: 4 `unsure`; borderline: 4 `unsure`. `human` does not appear | same | same | |
+| 4. Appeal path | 10 of 10 appeals return 200 `under_review`, add exactly one `appeal` line, leave the original line unchanged; unknown id returns 404 and no line | PASS | PASS | PASS | |
+| 5. Bad input | 6 of 6 bad requests return a 4xx JSON `error`, no 500, one rejection line each, `/ping` still answers | PASS | PASS | PASS | |
+
+### What actually came back
+
+Real output, copied from the console.
+
+```
+my own writing  (criterion 1)
+  trial 1: human, unsure, human, unsure, unsure, unsure, unsure, unsure, unsure, unsure
+  trial 2: human, unsure, human, unsure, unsure, unsure, unsure, unsure, unsure, unsure
+  trial 3: human, unsure, human, unsure, unsure, unsure, unsure, unsure, unsure, unsure
+
+spread ai  (criterion 2)
+  trial 1: ai, unsure, unsure, ai, unsure
+  trial 2: ai, unsure, unsure, ai, unsure
+  trial 3: ai, unsure, unsure, ai, unsure
+
+spread human  (criterion 2)
+  trial 1: human, human, unsure, unsure, unsure
+  trial 2: human, human, unsure, unsure, unsure
+  trial 3: human, human, unsure, unsure, unsure
+
+coverage ai  (criterion 3)
+  trial 1: ai, unsure, unsure, ai
+  trial 2: ai, unsure, unsure, ai
+  trial 3: ai, unsure, unsure, ai
+
+coverage human  (criterion 3)
+  trial 1: unsure, unsure, unsure, unsure
+  trial 2: unsure, unsure, unsure, unsure
+  trial 3: unsure, unsure, unsure, unsure
+
+coverage border  (criterion 3)
+  trial 1: unsure, unsure, unsure, unsure
+  trial 2: unsure, unsure, unsure, unsure
+  trial 3: unsure, unsure, unsure, unsure
+
+bad input  (criterion 5)
+  trial 1: —, —, —, —, —
+  trial 2: —, —, —, —, —
+  trial 3: —, —, —, —, —
+```
+
+```
+trial 1
+  criterion 4 (appeal path): PASS
+  criterion 5 (bad input): PASS
+
+trial 2
+  criterion 4 (appeal path): PASS
+  criterion 5 (bad input): PASS
+
+trial 3
+  criterion 4 (appeal path): PASS
+  criterion 5 (bad input): PASS
+```
+
+The `—` marks in the bad input rows are not failures. A rejection has no `guess`, so `run_eval.py` has nothing to print. The status codes are in the report.
+
+**What I notice, not yet a verdict:**
+
+- **Identical every time.** All three trials gave the same labels for every scenario, so the model signal did not wobble enough to change a label in this run.
+- **My own writing.** None of my ten pieces was labelled `ai`, but only two of ten reached `human`. The other eight landed in `unsure`.
+- **My human pieces in the coverage set.** All four came back `unsure`, so `human` is not reached by anything in the 12 inputs of criterion 3. The two `human` labels in this run came from pieces 1 and 3, which sit in the criterion 1 and 2 sets, not this one.
+- **My AI texts.** Only two of the five got `ai`. Three got `unsure`, so criterion 2's second clause (at least 4 of 5 above 0.50) depends on their combined scores, which I need from the report.
+- **Borderline.** All four got `unsure`.
+- **Scores:** *TO FILL from `results/run_2026-11-05_1407_before.md`.*
+
+**Criteria 4 and 5** each passed in all three trials. The detail (the ten appeal responses, the six bad-input status codes and error names, the `/ping` check) is in `results/checks_2026-11-05_1412_before.md`: *TO FILL, paste the trial 1 JSON blocks from that file.*
 
 ## The Improvement
 
