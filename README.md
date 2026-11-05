@@ -29,7 +29,7 @@ A submission takes this path:
 
 1. **Arrives at `POST /submit`** (`app.py::submit`). It is rate limited per `creator_id`, then validated: a JSON object, non-empty `text` under 20,000 characters, non-empty `creator_id`. Bad input gets a clear 4xx JSON error and a logged rejection, never a crash.
 2. **Signal one** (`detector.py::model_signal`) runs gpt2 locally and adds a 0-1 score for how predictable the text is.
-3. **Signal two** (`stylometry.py::style_signal`) adds a 0-1 score for the shape of the text: sentence-length spread, vocabulary repetition, and punctuation.
+3. **Signal two** (`stylometry.py::style_signal`) adds a 0-1 score for the shape of the text: sentence-length spread and vocabulary repetition. (Punctuation counted until Milestone 5; see The Improvement.)
 4. **The combining rule** (`scoring.py::combine_signals`) turns the two scores into one combined score.
 5. **Labelling** (`scoring.py::score_to_label`) maps that score to a guess (`ai`, `human` or `unsure`) and a plain-language sentence for the reader.
 6. **The audit log** (`audit.py::log_decision`) appends a JSON line to `logs/audit.jsonl` with the content id, creator id, both signal scores, the combined score, the guess, the label and status `decided`.
@@ -66,11 +66,13 @@ Signal one alone scored both of my own short sentences above the 0.65 `AI_THRESH
 
 All three run "higher = more human", so `style_signal` flips each onto a 0-1 "AI-ness" scale (linear between a fully-AI value and a fully-human value) and takes a weighted average: spread 0.5, type-token ratio 0.3, punctuation 0.2. Higher = more likely AI, the same direction as signal one. Under 3 words returns a neutral 0.5, and a one-sentence text drops the spread measure and re-weights the other two.
 
+> **Changed in Milestone 5:** punctuation no longer counts (`W_PUNCT` is now 0.0), so the weights are spread 0.5 and type-token ratio 0.3, scaled to fill the score (0.625 and 0.375). A text with fewer than two sentences is pinned at 0.4, which is what the old formula gave plain one-sentence text. Everything above, and every score recorded before The Improvement section, was produced by the old formula. Why I changed it is under **The Improvement**.
+
 **Why that might differ between human and AI writing:** Generated prose tends toward even, mid-length sentences and a narrower band of vocabulary. Human writing is lumpier, with a three-word sentence next to a forty-word one.
 
 **What it can't see:** It cannot read. Anything that changes the shape without changing the substance moves it: typos, chopped-up sentences, a pasted quotation. That is very cheap to do on purpose. Short, plain human writing also looks uniform to it, which is the same writer signal one is likely to accuse.
 
-**What I saw** (`python stylometry.py`, raw measure values):
+**What I saw** (`python stylometry.py`, raw measure values, old formula):
 
 | Text | spread | type-token | punctuation | style_signal |
 |---|---|---|---|---|
@@ -82,7 +84,7 @@ All three run "higher = more human", so `style_signal` flips each onto a 0-1 "AI
 - **Type-token ratio did almost nothing.** The AI paragraph's 0.753 sits at the human end of my scale (0.75), so it added no AI-ness, and very short texts score 1.000 because there is little room to repeat a word.
 - **One-sentence texts have no spread measure**, so the difference between 0.40 and 0.21 for two near-identical sentences came entirely from one question mark. That is fragile, and it is the short-text blind spot in practice.
 
-*Scale endpoints and weights: unchanged from the starting guesses I set before measuring.*
+*Scale endpoints and weights: unchanged from the starting guesses I set before measuring, until Milestone 5.*
 
 ### The combining rule
 
@@ -107,7 +109,7 @@ All three run "higher = more human", so `style_signal` flips each onto a 0-1 "AI
 
 **A case where my two signals split, and what my rule does with it:** "What in the name of 'Sweet Home Alabama' was I forced to hear?" is a short sentence I wrote. Signal one scored it 0.6892 (AI-like), because it is short and made of common words. Signal two scored it 0.2103 (human-like), because the question mark gave it some punctuation and it has no repeated words. The gap is 0.48, above 0.35, so the clamp applies. The average of 0.4498 is already inside the unsure band, so the guess is "unsure". Signal one alone would have given a confident AI accusation. The rule prevented a false positive on my own writing.
 
-**Where the rule failed:** "What in the name of 'Sweet Home Alabama' was I forced to hear? I honestly do not know what that was." scored model 0.7905 and style 0.5173, combined 0.6539, and got the `ai` label. The signals differed by only 0.27, so the clamp never applied. (The second sentence was written by an AI assistant for testing, so this is a near-miss rather than a clean sample.) The rule only protects writers when the signals disagree; it does nothing when both lean AI-like on short, plain text. I have not moved the thresholds. A candidate fix for unit 8 is requiring both signals to be at least 0.5 before the `ai` label can appear.
+**Where the rule failed:** "What in the name of 'Sweet Home Alabama' was I forced to hear? I honestly do not know what that was." scored model 0.7905 and style 0.5173, combined 0.6539, and got the `ai` label. The signals differed by only 0.27, so the clamp never applied. (The second sentence was written by an AI assistant for testing, so this is a near-miss rather than a clean sample.) The rule only protects writers when the signals disagree; it does nothing when both lean AI-like on short, plain text. I have not moved the thresholds. A candidate fix for unit 8 is requiring both signals to be at least 0.5 before the `ai` label can appear. (I replayed that rule in Milestone 5. It changes nothing on my data; see The Improvement.)
 
 **Against my criteria:** Criterion 2 asks for AI text to score at least 0.30 above human text. Against my two short human sentences the gap is about 0.24 to 0.25; against the longer human paragraph it is about 0.5. That early check used only a handful of inputs; the full 5-and-5 run is in the Run Log below.
 
@@ -138,6 +140,8 @@ Plain short writing did not reach "human" on its own. I did not move the thresho
 ---
 
 ## Sample Run
+
+*These samples were recorded before Milestone 5, with the old style formula.*
 
 **A submission that returns the unsure label**
 
@@ -254,6 +258,7 @@ PS> curl.exe "http://127.0.0.1:5000/log?limit=2"
 ---
 
 ## How I Used AI
+
 
 
 **Moment 1: the style signal and the false positive it let through**
@@ -448,7 +453,7 @@ Scores come from `logs/audit.jsonl`. Gap is the absolute difference between the 
 
 All of these are HELD. Every refusal left a log entry.
 
-**Rows that never reached my route.** RQ10 and RQ11 have no usable `creator_id`, so they count against my own address (`127.0.0.1`). RQ02, RQ06, RQ07, RQ08 and RQ09 used up the limit of 5 a minute first, and RQ10 and RQ11 came back 429 before the route ran. They are logged as `rate_limited` with `creator_id: "unknown"`, not as `invalid_body`. I marked them HELD because the request was refused, but this says nothing about my validation.*.
+**Rows that never reached my route.** RQ10 and RQ11 have no usable `creator_id`, so they count against my own address (`127.0.0.1`). RQ02, RQ06, RQ07, RQ08 and RQ09 used up the limit of 5 a minute first, and RQ10 and RQ11 came back 429 before the route ran. They are logged as `rate_limited` with `creator_id: "unknown"`, not as `invalid_body`. I marked them HELD because the request was refused, but this says nothing about my validation. I re-ran both after a minute: *<TO FILL: result of `--id RQ10` and `--id RQ11`, expected 400 `invalid_body`>*.
 
 **Flood family.** FL01_01 to FL01_05 got through and FL01_06 to FL01_12 got 429: five passed, seven were limited, matching the limit of 5 a minute.
 
@@ -673,7 +678,7 @@ python run_checks.py --label before    ->  results/checks_2026-11-05_1412_before
 
 ### Run log
 
-Every trial gave the same numbers.
+Every trial gave the same numbers. This is the **before** run.
 
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
@@ -859,6 +864,8 @@ The check also confirmed exactly six new rejection lines in the log per trial.
 
 Stage names: **S1** = signal one (`detector.py`), **S2** = signal two (`stylometry.py`), **CR** = combining rule (`scoring.py::combine_signals`), **TH** = thresholds (`config.py`).
 
+*All numbers in this section use the style formula as it was before Milestone 5.*
+
 ### The two misses against my criteria
 
 **Criterion 2 (gap 0.2427, target 0.30). Stage: S2, then CR.**
@@ -927,11 +934,121 @@ Stage names: **S1** = signal one (`detector.py`), **S2** = signal two (`stylomet
 4. **The clamp cuts both ways.** It kept FP07 and MF05 to MF07 from `ai`, and it kept EV07 from `human`. It also moved two of my five AI texts from `ai` to `unsure` and cost criterion 2 about 0.019. It never changed the outcome of any of the 15 broken attacks to `ai`.
 5. **Agreement is not accuracy.** In FP02 to FP05 both signals agree, so a "require both" rule would not help. Both measure how uniform and predictable the text is, and plain formal, technical or second-language writing is uniform and predictable. The two signals are not independent evidence about exactly the writers I most want to protect.
 
-**What I did not change.** No code, no thresholds, no criteria. Milestone 5 picks one change from what this points to. I haven't chosen it yet.
+**What I did not change in Milestone 4.** No code, no thresholds, no criteria.
+
+---
 
 ## The Improvement
 
-*Unit 8.*
+### What I changed (one change)
+
+In `stylometry.py`, **punctuation density no longer counts toward the style score** (`W_PUNCT` 0.2 → 0.0). Two things follow from that one edit, and I list them so nobody mistakes them for extra changes:
+
+- The two measures left (spread 0.5, type-token ratio 0.3) are scaled to fill the score, so they now count 0.625 and 0.375.
+- A one-sentence text used to get its 0.4 from the type-token ratio and the punctuation measure together. With punctuation gone it would have fallen to 0.0, so I pinned it at `ONE_SENTENCE_STYLE = 0.4`, its old value, so that nothing else moves.
+
+No thresholds, weights between the two signals, or the combining rule were touched.
+
+### Why this one
+
+My diagnosis (pattern 1) put the blame on short and plain writing, and the style signal's part of that is the punctuation measure. It scores **less** punctuation as AI-like, but in my own data plain human writing has the least punctuation:
+
+| Texts | Punctuation per word |
+|---|---|
+| Plain human writing, FP01 to FP08 | 0.000 to 0.034 |
+| The five AI texts from my criteria set | 0.094 to 0.130 |
+| AI paragraph with typos or rare words (EV01, EV04) | 0.047, 0.058 |
+| Human-edited text (EV05) | 0.085 |
+
+It gave the full 0.2 points of AI-ness to 6 of the 8 false-positive attacks (FP01 to FP04, FP06, FP08), including FP03, a careful non-native writer with 0.000 punctuation. It is the measure `stylometry.py` already called "ambiguous" in a comment, and the plainest case in the diagnosis of a measure pointing the wrong way for the people the system should protect.
+
+### Other changes I replayed and why I did not pick them
+
+I replayed these against my logged model scores (signal one never changes in a replay). They were done in a scratch script I did not commit, so treat the table as my working, not as a repo artifact. All use the same 24 scored attacks (EV, FP, PI) and my criteria texts as before.
+
+| Change replayed | EV broke | FP broke | PI broke | Criterion 2 gap | AI texts labelled `ai` (of 5) | Why not |
+|---|---|---|---|---|---|---|
+| Nothing (before) | 9 | 4 | 2 | 0.2427 | 2 | |
+| **Stop scoring punctuation (chosen)** | 9 | 3 | 1 | 0.2635 | 3 | |
+| Raise `AI_THRESHOLD` to 0.72 | 9 | 2 | 2 | 0.2614 | 0 | `ai` becomes unreachable on all my criteria texts, which breaks criterion 3 for good |
+| Remove the clamp | 9 | 5 | 2 | 0.2614 | 4 | accuses one more writer |
+| Require both signals at least 0.5 for `ai` | 9 | 4 | 2 | 0.2427 | 2 | changes nothing: FP02 to FP05 have both signals above 0.5 |
+| Drop the type-token ratio on short multi-sentence texts | 8 | 5 | 1 | 0.3735 | 5 | would meet criterion 2, but accuses one more writer, against the priority I set in `design.md` |
+| Weights 0.6 model / 0.4 style | 9 | 4 | 1 | 0.2539 | 3 | tiny gain, and it leans harder on the signal that over-scores plain text |
+
+The last-but-one row is the honest tension in this project. A change that catches more AI text also accuses more real writers, because the two signals overlap on exactly that kind of text.
+
+### One replay I rejected as an artifact
+
+My first replay of the chosen idea showed a criterion 2 gap of **0.426**. I threw that number out. Removing punctuation without pinning one-sentence text made every single-sentence piece of mine score a style of 0.0, which lowered the human mean through the clamp for no real reason. The 0.2635 above is the version I trust.
+
+### Prediction, written before the after-run
+
+From `python replay_changes.py` (saved in `results/predicted_after.md`). This is a replay of the logged model scores through the new style formula. It is **not** a result.
+
+| What | Before (real) | Predicted after |
+|---|---|---|
+| Scored attacks that BROKE | 15 | 13 |
+| Evasion BROKE (of 9 scored) | 9 | 9 |
+| False positive BROKE | 4 | 3 (FP04 `ai` → `unsure`) |
+| Prompt injection BROKE | 2 | 1 (PI01 `human` → `unsure`) |
+| FP08 (real, three short sentences) | `unsure` | `human` |
+| FP02, FP03, FP05 | `ai` | still `ai` (combined 0.6863, 0.6552, 0.7879) |
+| Criterion 1: own pieces labelled `ai` | 0 | 0 |
+| Criterion 2: gap | 0.2427 | 0.2635 (still below 0.30) |
+| Criterion 2: AI texts above 0.50 | 5 | 5 |
+| Criterion 3: labels `ai` / `human` / `unsure` over 12 | 2 / 0 / 10 | 2 / 0 / 10 |
+| AI texts labelled `ai` (of 5) | 2 | 3 |
+
+**What I expect, in plain words.** It fixes one false accusation (FP04), moves the injection from `human` to `unsure`, and catches one more AI text, with no new false accusation in my own writing. It does **not** fix criterion 2 or 3, it does not help evasion at all, and it does not touch the worst outcome: FP05 stays accused at about 0.79. FP03 stays accused by only 0.0052, so I would not call it fixed in any meaningful sense.
+
+### Limits I know about
+
+- **I chose this on the same texts I'm testing it on.** The after-run cannot independently confirm that the change is a good one, only that it behaves as replayed. A fresh set of human and AI texts would.
+- **The AI texts in my criteria set were written by an AI assistant**, and they contain commas. Part of the criterion 2 improvement comes from them. The attack set evidence (six real-writing attacks getting the maximum punctuation points) is the stronger reason.
+- **PI01's improvement is luck.** It moves to `unsure` because the signals disagree by 0.42 and the clamp lifts the score to 0.36. The injection still works on the signals; it just no longer lands on `human`.
+- **One-sentence text is still weak.** Its style is pinned at a number that says nothing true. I list it under What's Still Broken.
+
+### Before and after, side by side
+
+Fill the After column from the real after-run. If it differs from the prediction, say so and say why.
+
+**Attacks** (`python run_attacks.py --set attack_set --label after`, then `python fill_verdicts.py` on its report):
+
+| Family | Before BROKE | Predicted after | After (real) |
+|---|---|---|---|
+| evasion | 9 | 9 | *TO FILL* |
+| false_positive | 4 | 3 | *TO FILL* |
+| prompt_injection | 2 | 1 | *TO FILL* |
+| malformed and flood | 0 | 0 | *TO FILL* |
+| **Total** | **15** | **13** | *TO FILL* |
+
+The rows that were predicted to change:
+
+| ID | Before: guess, combined | Predicted after | After (real) |
+|---|---|---|---|
+| FP04 | `ai`, 0.6831 | `unsure`, 0.6248 | *TO FILL* |
+| FP08 | `unsure`, 0.3947 | `human`, 0.3280 | *TO FILL* |
+| PI01 | `human`, 0.3499 | `unsure`, 0.3600 | *TO FILL* |
+| FP02 | `ai`, 0.7228 | `ai`, 0.6863 | *TO FILL* |
+| FP03 | `ai`, 0.7047 | `ai`, 0.6552 | *TO FILL* |
+| FP05 | `ai`, 0.8033 | `ai`, 0.7879 | *TO FILL* |
+
+**Criteria** (`python run_eval.py --label after`, `python run_checks.py --label after`):
+
+| Criterion | Before | Predicted after | After (real) | Verdict after |
+|---|---|---|---|---|
+| 1. own pieces labelled `ai` | 0 of 10, MET | 0 of 10 | *TO FILL* | *TO FILL* |
+| 2. gap, AI mean minus human mean | 0.2427, MISSED | 0.2635 | *TO FILL* | *TO FILL* |
+| 3. labels `ai` / `human` / `unsure` | 2 / 0 / 10, MISSED | 2 / 0 / 10 | *TO FILL* | *TO FILL* |
+| 4. appeal path | PASS ×3, MET | no change | *TO FILL* | *TO FILL* |
+| 5. bad input | PASS ×3, MET | no change | *TO FILL* | *TO FILL* |
+
+**Worst outcome, FP05, after:** *TO FILL: guess, model, style, combined.* Predicted: still `ai`, combined 0.7879.
+
+**Did the change cost anything?** *TO FILL: any attack or criterion that got worse, and by how much.*
+
+---
 
 ## What's Still Broken
 
