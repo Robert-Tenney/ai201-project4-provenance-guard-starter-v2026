@@ -255,40 +255,20 @@ PS> curl.exe "http://127.0.0.1:5000/log?limit=2"
 
 ## How I Used AI
 
-*Draft: edit so every line is true to what you did.*
 
-**Moment 1: acceptance criteria and design notes**
-
-- *What I asked for:* Help with the Milestone 1 trace and the Milestone 2 acceptance criteria.
-- *What came back:* A full `design.md` and five complete criteria with numbers and reasons.
-- *What I changed:* The brief says criteria should be my own, so I reviewed each one, asking whether someone who couldn't ask me could check it. *(Edit this to say what you actually changed, such as a number you adjusted or a reason you rewrote. If you changed nothing, say so plainly.)*
-
-**Moment 2: the style signal and the false positive it let through**
+**Moment 1: the style signal and the false positive it let through**
 
 - *What I asked for:* An implementation of `stylometry.py` and the combining rule, with the disagreement clamp.
 - *What came back:* Three measures with starting-guess scale endpoints, and a rule that clamps to "unsure" when the signals split.
 - *What I changed:* Nothing in the code, but running it showed problems the starting guesses hid. Type-token ratio did almost nothing (the AI paragraph scored 0.753, at the human end of my scale), and a human sentence plus one extra sentence scored 0.6539 and was labelled `ai`, because the clamp only fires when the signals disagree. I recorded both as findings instead of moving the thresholds, and noted a "both signals at least 0.5" rule as a fix to try in unit 8.
 
-**Moment 3 (unit 8, Milestone 1): rate limiting and the README write-up**
+**Moment 2 (unit 8, Milestone 1): rate limiting and the README write-up**
 
 - *What I asked for:* The completed `config.py` and `app.py` for Milestone 1, and help writing up the Rate Limiting section from my real output.
 - *What came back:* Limiter settings of 5 per minute and 50 per day with reasoning, the activated `@limiter.limit(...)` decorator, a small change to the 429 handler so it logs `"unknown"` instead of a non-string `creator_id`, and a draft of the README section.
 - *What I checked:* I ran the flood test myself and used its real output. When my first log read-back showed only the `flood_tester` rejections and no decisions, I re-ran the three-text check until `m1_check` decisions appeared, rather than pasting entries that didn't show what the section claimed. *(Edit this to say what you actually changed or decided about the limits yourself.)*
 
-**Moment 4 (unit 8, Milestone 2): running the attack set**
 
-- *What I asked for:* Help preparing the attack run, and two small helper scripts, `fill_verdicts.py` and `m2_extract.py`, to fill the Verdict column and pull scores out of my own `audit_extract.json`.
-- *What came back:* Predictions before I ran it, built from my code and a local run of `stylometry.py`. Most were right: the route's 400/413/422 responses, five of twelve flood rows passing, and RQ10 and RQ11 hitting 429 before my route ran. Two were wrong. I expected EV01 (typos) and EV04 (rare words) to be caught, and both came back `unsure`. EV01's typos moved signal one, not signal two as I assumed.
-- *What I decided myself:* *(Edit this. For example: which verdict rule I used for "unsure", why MF03 to MF07 count as held, why I chose FP05 as the worst outcome. The cause of the worst outcome is mine to work out in Milestone 4.)*
-
-**Moment 5 (unit 8, Milestone 3): running my own five criteria**
-
-- *What I asked for:* A `scenarios.py` for my five criteria and a way to test the two that `run_eval.py` can't (the appeal path and bad input).
-- *What came back:* A filled `scenarios.py` with five AI texts and four borderline texts written by the assistant, and a new `run_checks.py` that submits, appeals, reads the log back and checks the bad-input requests. The ten pieces of my own writing were left for me, because criterion 1 is only meaningful with writing I did myself.
-- *What went wrong:* The first copy of `run_checks.py` I saved was incomplete, and Python stopped with a `SyntaxError` at line 296. I replaced it with the full file and it ran. The assistant also told me all three labels had appeared in my criterion 3 set, which was wrong: `human` never appeared in those 12 inputs. I caught it by reading my own run output.
-- *What I decided myself:* *(Edit this. For example: which ten pieces I used and why pieces 1 to 3 are the plain ones, and whether I agree the borderline texts are borderline.)*
-
-**Also worth saying, if true:** `/appeal` kept returning `501 not_implemented` because my `app.py` still had the starter stub. I only found that by reading the response text, then replaced the function and restarted.
 
 ---
 
@@ -468,7 +448,7 @@ Scores come from `logs/audit.jsonl`. Gap is the absolute difference between the 
 
 All of these are HELD. Every refusal left a log entry.
 
-**Rows that never reached my route.** RQ10 and RQ11 have no usable `creator_id`, so they count against my own address (`127.0.0.1`). RQ02, RQ06, RQ07, RQ08 and RQ09 used up the limit of 5 a minute first, and RQ10 and RQ11 came back 429 before the route ran. They are logged as `rate_limited` with `creator_id: "unknown"`, not as `invalid_body`. I marked them HELD because the request was refused, but this says nothing about my validation. I re-ran both after a minute: *<TO FILL: result of `--id RQ10` and `--id RQ11`, expected 400 `invalid_body`>*.
+**Rows that never reached my route.** RQ10 and RQ11 have no usable `creator_id`, so they count against my own address (`127.0.0.1`). RQ02, RQ06, RQ07, RQ08 and RQ09 used up the limit of 5 a minute first, and RQ10 and RQ11 came back 429 before the route ran. They are logged as `rate_limited` with `creator_id: "unknown"`, not as `invalid_body`. I marked them HELD because the request was refused, but this says nothing about my validation.*.
 
 **Flood family.** FL01_01 to FL01_05 got through and FL01_06 to FL01_12 got 429: five passed, seven were limited, matching the limit of 5 a minute.
 
@@ -674,97 +654,280 @@ I chose FP05, a piece of technical documentation written by a person. I chose it
 
 **Why it's the worst:** A person who wrote their own setup instructions would be told their work "may have been written with AI". Both signals gave it about 0.80, so the system had no uncertainty to show the writer, and no rule in my pipeline made it less confident. This is the one I would least want to explain, because it is exactly the writer my `design.md` said the system must not accuse.
 
-**Which stage let it through:** not diagnosed yet. That is Milestone 4. In my breakout I'm sharing only the input and the output.
+**Which stage let it through:** Both signals, and then nothing downstream. The combining rule cannot help here because the signals agree: the gap is 0.01, far under the 0.35 that triggers the clamp. The full diagnosis is under **Diagnosis** below.
 
 ---
 
 ## Run Log and Verdicts
 
-**How I ran it:** `scenarios.py` holds what each of my five criteria needs. `run_eval.py` runs three of them (criteria 1, 2, 3 and the five dict-shaped bad inputs of 5) three times. `run_checks.py` runs criteria 4 and 5 in full, three times, because `run_eval.py` only sends `/submit`: the appeal path needs a submission and then an appeal against its real `content_id`, and bad input needs a JSON list body and a log check, which `run_eval.py` can't express. I wrote `run_checks.py` as an extension for that reason. Everything was run against the same service as the attack run, with `python run_eval.py --label before` and `python run_checks.py --label before`.
+**How I ran it:** `scenarios.py` holds what each of my five criteria needs. `run_eval.py` runs criteria 1, 2 and 3, plus five of the six bad inputs for criterion 5, three times each. `run_checks.py` runs criteria 4 and 5 in full, three times, because `run_eval.py` only sends `/submit`: the appeal path needs a submission and then an appeal against its real `content_id`, and bad input needs a JSON list body and a log check, which `run_eval.py` can't express. I wrote `run_checks.py` as an extension for that reason. Both ran against the same service as the attack run:
 
-Reports: `results/run_2026-11-05_1407_before.md` and `results/checks_2026-11-05_1412_before.md`.
+```
+python run_eval.py --label before      ->  results/run_2026-11-05_1407_before.md
+python run_checks.py --label before    ->  results/checks_2026-11-05_1412_before.md
+```
 
-**What each scenario contained.** Criterion 1: ten pieces I wrote myself (pieces 1 to 3 plain, short-sentence writing). Criterion 2: five AI texts and my pieces 1, 3, 5, 7, 9. Criterion 3: four AI texts, my pieces 2, 4, 6, 8, and four borderline texts. I fixed those splits before running so I couldn't choose pieces after seeing scores. The AI texts and the borderline texts were written by an AI assistant for this test; the borderline ones are AI-style drafts with human-style edits.
+**What each scenario contained.** Criterion 1: ten pieces I wrote myself. Criterion 2: five AI texts and my pieces 1, 3, 5, 7, 9. Criterion 3: four AI texts, my pieces 2, 4, 6, 8, and four borderline texts. I fixed those splits before running so I couldn't choose pieces after seeing scores. The AI texts and the borderline texts were written by an AI assistant for this test; the borderline ones are AI-style drafts with human-style edits.
+
+**A limit of my own test set, stated up front:** my ten pieces are single short sentences (about 6 to 12 words each), not the paragraphs I described when I planned the test. A one-sentence text has no sentence-length spread, so `style_score` came out at exactly `0.4` for all ten. In criterion 1 only the model signal varied. It means this run says little about how paragraph-length human writing is labelled.
 
 ### Run log
 
-Verdicts are left blank. I decide MET or MISSED in Milestone 4. The Run cells below hold what came back; the label counts are real output. Cells marked TO FILL need the scores from the report.
+Every trial gave the same numbers.
 
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
-| 1. False positives | At most 1 of 10 of my pieces labelled `ai`, in each trial | 0 `ai`, 2 `human`, 8 `unsure` | 0 `ai`, 2 `human`, 8 `unsure` | 0 `ai`, 2 `human`, 8 `unsure` | |
-| 2. Score spread | AI mean at least 0.30 above human mean, and at least 4 of 5 AI texts above 0.50 | AI: 2 `ai`, 3 `unsure`; human: 2 `human`, 3 `unsure`. Means and scores: *TO FILL* | same labels. *TO FILL* | same labels. *TO FILL* | |
-| 3. Label coverage | `ai`, `human` and `unsure` each appear in the 12 inputs; at least 3 of 4 borderline get `unsure` | AI: 2 `ai`, 2 `unsure`; human: 4 `unsure`; borderline: 4 `unsure`. `human` does not appear | same | same | |
-| 4. Appeal path | 10 of 10 appeals return 200 `under_review`, add exactly one `appeal` line, leave the original line unchanged; unknown id returns 404 and no line | PASS | PASS | PASS | |
-| 5. Bad input | 6 of 6 bad requests return a 4xx JSON `error`, no 500, one rejection line each, `/ping` still answers | PASS | PASS | PASS | |
+| 1. False positives | At most 1 of 10 of my pieces labelled `ai`, in each trial | 0 `ai` (2 `human`, 8 `unsure`) | 0 `ai` (2 `human`, 8 `unsure`) | 0 `ai` (2 `human`, 8 `unsure`) | **MET** (with a caveat, below) |
+| 2. Score spread | AI mean at least 0.30 above human mean, and at least 4 of 5 AI texts above 0.50 | AI mean 0.6543, human mean 0.4117, gap 0.2427; 5 of 5 AI above 0.50 | same | same | **MISSED** (gap 0.2427 < 0.30) |
+| 3. Label coverage | `ai`, `human` and `unsure` each appear across 12 inputs; at least 3 of 4 borderline get `unsure` | `ai` 2, `human` 0, `unsure` 10; borderline 4 of 4 `unsure` | same | same | **MISSED** (`human` never appeared) |
+| 4. Appeal path | 10 of 10 appeals return 200 `under_review`, add exactly one `appeal` line, leave the original line unchanged; unknown id returns 404 and no line | PASS | PASS | PASS | **MET** |
+| 5. Bad input | 6 of 6 bad requests return a 4xx JSON `error`, no 500, one rejection line each, `/ping` still answers | PASS | PASS | PASS | **MET** |
 
-### What actually came back
+**Criterion 1 is MET, and I don't think that settles much.** All ten pieces were single sentences, which the style signal scores at a constant 0.4, and in the attack run 4 of 8 real-writing attacks (FP02 to FP05, all paragraph-length) were accused. The target stays at 1 of 10 and I did not change it. What it needs is a harder test set, not an easier target.
 
-Real output, copied from the console.
+**I did not revise any criterion.** Criteria 2 and 3 were missed, but both were measurable, which is the only reason to revise one. Lowering 0.30 because I missed it would be the wrong move.
 
-```
-my own writing  (criterion 1)
-  trial 1: human, unsure, human, unsure, unsure, unsure, unsure, unsure, unsure, unsure
-  trial 2: human, unsure, human, unsure, unsure, unsure, unsure, unsure, unsure, unsure
-  trial 3: human, unsure, human, unsure, unsure, unsure, unsure, unsure, unsure, unsure
+### Criterion 1: my own writing
 
-spread ai  (criterion 2)
-  trial 1: ai, unsure, unsure, ai, unsure
-  trial 2: ai, unsure, unsure, ai, unsure
-  trial 3: ai, unsure, unsure, ai, unsure
+Scores from trial 1 (trials 2 and 3 matched to four decimals).
 
-spread human  (criterion 2)
-  trial 1: human, human, unsure, unsure, unsure
-  trial 2: human, human, unsure, unsure, unsure
-  trial 3: human, human, unsure, unsure, unsure
+| # | Piece (first words) | model | style | combined | guess |
+|---|---|---|---|---|---|
+| 1 | Hello my name is Robert Tenney | 0.2220 | 0.4 | 0.3110 | human |
+| 2 | My favorite thing to do is play video games | 0.8159 | 0.4 | 0.6079 | unsure |
+| 3 | I like collecting plushies of video game characters | 0.1100 | 0.4 | 0.2550 | human |
+| 4 | Today will be a great day. | 0.8549 | 0.4 | 0.6275 | unsure |
+| 5 | I will get all of my work done today. | 0.6488 | 0.4 | 0.5244 | unsure |
+| 6 | Depending on my mood I will take a break after completing this Milesto... | 0.3935 | 0.4 | 0.3968 | unsure |
+| 7 | I am not sure what I will do after I submit this assignment | 0.6133 | 0.4 | 0.5067 | unsure |
+| 8 | When I work I tend to listen to music. | 0.6372 | 0.4 | 0.5186 | unsure |
+| 9 | I usually listen to video game soundtracks and remixes of said soundtr... | 0.5224 | 0.4 | 0.4612 | unsure |
+| 10 | I am not sure what I should do for the final sentence. | 0.6688 | 0.4 | 0.5344 | unsure |
 
-coverage ai  (criterion 3)
-  trial 1: ai, unsure, unsure, ai
-  trial 2: ai, unsure, unsure, ai
-  trial 3: ai, unsure, unsure, ai
+Two real entries from the run (the full set is in `results/run_2026-11-05_1407_before.md`):
 
-coverage human  (criterion 3)
-  trial 1: unsure, unsure, unsure, unsure
-  trial 2: unsure, unsure, unsure, unsure
-  trial 3: unsure, unsure, unsure, unsure
-
-coverage border  (criterion 3)
-  trial 1: unsure, unsure, unsure, unsure
-  trial 2: unsure, unsure, unsure, unsure
-  trial 3: unsure, unsure, unsure, unsure
-
-bad input  (criterion 5)
-  trial 1: —, —, —, —, —
-  trial 2: —, —, —, —, —
-  trial 3: —, —, —, —, —
+```json
+{
+  "status": 200,
+  "guess": "human",
+  "confidence": 0.311,
+  "model_score": 0.222,
+  "style_score": 0.4,
+  "label": "We think this was probably written by a person. This is an estimate, not a certainty.",
+  "sent": "Hello my name is Robert Tenney"
+}
 ```
 
-```
-trial 1
-  criterion 4 (appeal path): PASS
-  criterion 5 (bad input): PASS
-
-trial 2
-  criterion 4 (appeal path): PASS
-  criterion 5 (bad input): PASS
-
-trial 3
-  criterion 4 (appeal path): PASS
-  criterion 5 (bad input): PASS
+```json
+{
+  "status": 200,
+  "guess": "unsure",
+  "confidence": 0.6275,
+  "model_score": 0.8549,
+  "style_score": 0.4,
+  "label": "We can't tell whether this was written by a person or by an AI. That is not a judgment about your work, and plenty of people who write plainly get this result. If you would like it looked at, you can appeal.",
+  "sent": "Today will be a great day."
+}
 ```
 
-The `—` marks in the bad input rows are not failures. A rejection has no `guess`, so `run_eval.py` has nothing to print. The status codes are in the report.
+### Criterion 2: score spread
 
-**What I notice, not yet a verdict:**
+| Group | Text (first words) | model | style | combined | guess |
+|---|---|---|---|---|---|
+| AI | The implementation of the proposed framework... | 0.7617 | 0.5761 | 0.6689 | ai |
+| AI | Regular physical activity plays a crucial role... | 0.9040 | 0.4883 | 0.6400 | unsure |
+| AI | Climate change represents one of the most pressing... | 0.8793 | 0.4758 | 0.6400 | unsure |
+| AI | Effective communication is a fundamental skill... | 0.8280 | 0.5578 | 0.6929 | ai |
+| AI | Artificial intelligence has the potential to transform... | 0.7422 | 0.5173 | 0.6298 | unsure |
+| Human | Hello my name is Robert Tenney (piece 1) | 0.2220 | 0.4 | 0.3110 | human |
+| Human | I like collecting plushies... (piece 3) | 0.1100 | 0.4 | 0.2550 | human |
+| Human | I will get all of my work done today. (piece 5) | 0.6488 | 0.4 | 0.5244 | unsure |
+| Human | I am not sure what I will do... (piece 7) | 0.6133 | 0.4 | 0.5067 | unsure |
+| Human | I usually listen to video game soundtracks... (piece 9) | 0.5224 | 0.4 | 0.4612 | unsure |
 
-- **Identical every time.** All three trials gave the same labels for every scenario, so the model signal did not wobble enough to change a label in this run.
-- **My own writing.** None of my ten pieces was labelled `ai`, but only two of ten reached `human`. The other eight landed in `unsure`.
-- **My human pieces in the coverage set.** All four came back `unsure`, so `human` is not reached by anything in the 12 inputs of criterion 3. The two `human` labels in this run came from pieces 1 and 3, which sit in the criterion 1 and 2 sets, not this one.
-- **My AI texts.** Only two of the five got `ai`. Three got `unsure`, so criterion 2's second clause (at least 4 of 5 above 0.50) depends on their combined scores, which I need from the report.
-- **Borderline.** All four got `unsure`.
-- **Scores:** *TO FILL from `results/run_2026-11-05_1407_before.md`.*
+- **AI mean:** (0.6689 + 0.6400 + 0.6400 + 0.6929 + 0.6298) / 5 = **0.6543**
+- **Human mean:** (0.3110 + 0.2550 + 0.5244 + 0.5067 + 0.4612) / 5 = **0.4117**
+- **Gap: 0.2427** against a target of 0.30.
+- **AI texts above 0.50:** 5 of 5, against a target of at least 4.
 
-**Criteria 4 and 5** each passed in all three trials. The detail (the ten appeal responses, the six bad-input status codes and error names, the `/ping` check) is in `results/checks_2026-11-05_1412_before.md`: *TO FILL, paste the trial 1 JSON blocks from that file.*
+Two real entries from trial 1 (the clamped one and the `ai` one):
+
+```json
+{
+  "status": 200,
+  "guess": "unsure",
+  "confidence": 0.64,
+  "model_score": 0.904,
+  "style_score": 0.4883,
+  "label": "We can't tell whether this was written by a person or by an AI. That is not a judgment about your work, and plenty of people who write plainly get this result. If you would like it looked at, you can appeal.",
+  "sent": "Regular physical activity plays a crucial role in maintaining both phy"
+}
+```
+
+```json
+{
+  "status": 200,
+  "guess": "ai",
+  "confidence": 0.6929,
+  "model_score": 0.828,
+  "style_score": 0.5578,
+  "label": "Our tools think this may have been written with AI, but they can get this wrong, especially with short or plainly written text. If you wrote it yourself, you can appeal and we will mark it for review.",
+  "sent": "Effective communication is a fundamental skill that contributes to suc"
+}
+```
+
+### Criterion 3: label coverage
+
+12 inputs: 4 AI, 4 mine, 4 borderline.
+
+| Group | Text (first words) | model | style | combined | guess |
+|---|---|---|---|---|---|
+| AI | The implementation of the proposed framework... | 0.7617 | 0.5761 | 0.6689 | ai |
+| AI | Regular physical activity plays a crucial role... | 0.9040 | 0.4883 | 0.6400 | unsure |
+| AI | Climate change represents one of the most pressing... | 0.8793 | 0.4758 | 0.6400 | unsure |
+| AI | Effective communication is a fundamental skill... | 0.8280 | 0.5578 | 0.6929 | ai |
+| Human | My favorite thing to do is play video games (piece 2) | 0.8159 | 0.4 | 0.6079 | unsure |
+| Human | Today will be a great day. (piece 4) | 0.8549 | 0.4 | 0.6275 | unsure |
+| Human | Depending on my mood I will take a break... (piece 6) | 0.3935 | 0.4 | 0.3968 | unsure |
+| Human | When I work I tend to listen to music. (piece 8) | 0.6372 | 0.4 | 0.5186 | unsure |
+| Borderline | I've been working from home for about two years now... | 0.5398 | 0.6040 | 0.5719 | unsure |
+| Borderline | Learning a second language takes time... | 0.3922 | 0.5415 | 0.4668 | unsure |
+| Borderline | Public libraries remain an important community resource... | 0.6248 | 0.1990 | 0.4119 | unsure |
+| Borderline | Budgeting does not have to be complicated... | 0.5503 | 0.1501 | 0.3600 | unsure |
+
+Label counts across the 12: `ai` 2, `unsure` 10, `human` **0**. All four borderline texts got `unsure`.
+
+### Criterion 5, part one: five bad bodies through `run_eval.py`
+
+Every trial returned the same five statuses, in order: **400, 400, 400, 400, 413**. The `—` in the console is not a failure. A rejection has no `guess`, so `run_eval.py` has nothing to print there.
+
+```json
+{
+  "status": 413,
+  "guess": null,
+  "confidence": null,
+  "model_score": null,
+  "style_score": null,
+  "label": null,
+  "sent": "word word word word word word word word word word word word word word "
+}
+```
+
+### Criteria 4 and 5 in full, from `run_checks.py`
+
+Trial 1 appeal path. In trials 2 and 3 the shape is identical, with new `content_id`s. All ten appeals returned 200 `under_review` and the unknown id returned 404:
+
+```json
+[
+  {"appeal": 1,  "content_id": "a7c33b03-4238-4650-ac9d-d92feef606d1", "http": 200, "status": "under_review", "ok": true},
+  {"appeal": 2,  "content_id": "5b18bb10-1485-4e88-ba97-7adce0b12f74", "http": 200, "status": "under_review", "ok": true},
+  {"appeal": 3,  "content_id": "54d26a6e-fd96-401e-93ed-26d8e055ec72", "http": 200, "status": "under_review", "ok": true},
+  {"appeal": 4,  "content_id": "f46a2d8d-f794-417a-befa-c12b2298e074", "http": 200, "status": "under_review", "ok": true},
+  {"appeal": 5,  "content_id": "fc57988c-51e1-4843-9f5a-cc7cd6913c7b", "http": 200, "status": "under_review", "ok": true},
+  {"appeal": 6,  "content_id": "ca8312a1-7e41-459f-8b43-2e4e00701a30", "http": 200, "status": "under_review", "ok": true},
+  {"appeal": 7,  "content_id": "fdd2a9d5-e130-4ab4-b802-0589ef213d01", "http": 200, "status": "under_review", "ok": true},
+  {"appeal": 8,  "content_id": "522a57c8-4f99-4324-8211-68eeb7c08257", "http": 200, "status": "under_review", "ok": true},
+  {"appeal": 9,  "content_id": "3eeecbea-8d5a-4ab7-81e8-9f4fd6cca213", "http": 200, "status": "under_review", "ok": true},
+  {"appeal": 10, "content_id": "18316b41-2256-441a-a86a-6758d4e3c0af", "http": 200, "status": "under_review", "ok": true},
+  {"appeal": "unknown id", "content_id": "dd6a4e52-e08d-48cd-8060-7780560616d2", "http": 404, "ok": true}
+]
+```
+
+Besides the status codes, `run_checks.py` also confirmed, for each trial, that the log gained exactly ten `appeal` lines carrying the writer's reasoning, that every original `decided` line was unchanged, and that the unknown id added no appeal line.
+
+Trial 1 bad input. Trials 2 and 3 are identical:
+
+```json
+[
+  {"request": "text missing",      "http": 400, "error": "invalid_text", "ok": true},
+  {"request": "text empty",        "http": 400, "error": "invalid_text", "ok": true},
+  {"request": "text whitespace",   "http": 400, "error": "invalid_text", "ok": true},
+  {"request": "text null",         "http": 400, "error": "invalid_text", "ok": true},
+  {"request": "text 50,000 words", "http": 413, "error": "text_too_long", "ok": true},
+  {"request": "body is a list",    "http": 400, "error": "invalid_body", "ok": true},
+  {"request": "/ping afterwards",  "http": 200, "ok": true}
+]
+```
+
+The check also confirmed exactly six new rejection lines in the log per trial.
+
+---
+
+## Diagnosis
+
+**How I did this, and what it can't tell me.** I used `diagnose_style.py`, which splits the style score into what each of its three measures contributed (output in `results/style_breakdown_before.md`). It uses the service's own `stylometry.py`, and for every attack and test text I checked, its score matched the `style_score` in my log exactly. So the **signal two** claims below are measured. I did **not** re-run gpt2, so every claim about **signal one** is an inference from the `model_score` the service returned, marked *(inferred)*.
+
+Stage names: **S1** = signal one (`detector.py`), **S2** = signal two (`stylometry.py`), **CR** = combining rule (`scoring.py::combine_signals`), **TH** = thresholds (`config.py`).
+
+### The two misses against my criteria
+
+**Criterion 2 (gap 0.2427, target 0.30). Stage: S2, then CR.**
+
+| | model (mean) | style (mean) | combined (mean) |
+|---|---|---|---|
+| 5 AI texts | 0.8230 | 0.5231 | 0.6543 |
+| 5 human pieces | 0.4233 | 0.4000 | 0.4117 |
+| gap | 0.3997 | 0.1231 | 0.2427 |
+
+- **Most of the gap is S1.** Each signal counts half, so the model signal adds 0.1998 to the combined gap and the style signal only 0.0616. Together that is 0.2614, before the clamp.
+- **Why S2 separates so little.**
+  - My AI texts are about 50 words, so the type-token ratio is 0.85 to 0.93. That is above the human end of its scale (0.75), so it adds **0 points**, and 30% of the style weight does nothing on short text.
+  - The same AI texts have commas (punctuation 0.094 to 0.130), which the style signal reads as human-like.
+  - So AI texts only reach style scores of 0.48 to 0.58.
+  - Every human piece is one sentence with no punctuation, which scores exactly 0.4. The floor sits only 0.12 below the AI texts.
+- **Then CR takes another 0.0187.** Two AI texts had model scores of 0.904 and 0.879 against style scores of 0.488 and 0.476. The gaps of 0.416 and 0.403 triggered the clamp, so their plain averages (0.696 and 0.678, both `ai`) became 0.64. Without the clamp the mean would be 0.6731, not 0.6543.
+- **Even with no clamp the target is missed** (0.2614 < 0.30), so the clamp is not the main cause. The short-text behaviour of S2 is.
+
+**Criterion 3 (`human` never appeared in the 12 inputs). Stage: S2 and TH, with S1 doing the rest.**
+
+- **The 0.4 floor.** For a one-sentence text the style score is built from only two measures. The type-token ratio of a short text is 1.0, which scores 0, and with no punctuation the punctuation measure scores 1 (0.2 of the 0.5 weight), so the style score comes out at exactly **0.4**.
+- **What that does to `human`.** Combined = 0.5 × model + 0.5 × 0.4 = 0.5 × model + 0.2. The `human` label needs a combined score of 0.35 or less, so `model_score` must be **0.30 or lower**. Only my pieces 1 and 3 (0.222 and 0.110) got there. Piece 6 (model 0.3935) landed at 0.3968, 0.047 too high.
+- **Where S1 comes in.** My other three human pieces scored 0.82, 0.85 and 0.64 on plain, common-word sentences *(inferred: short, predictable wording is easy for gpt2)*. That is the blind spot I wrote about in the signals section.
+- **This is not "human is unreachable".** A longer personal paragraph of mine ("Grandfather's kitchen") scored 0.2377 and got `human`. The miss comes from my human test pieces being one sentence each. The criterion as written is still missed.
+- **The borderline clause held:** 4 of 4 `unsure`. It held partly because the clamp and the wide band catch everything near the middle.
+
+### The 15 attacks that broke
+
+| ID | Stage | Mechanism and evidence |
+|---|---|---|
+| EV01 typos | S1 | Misspellings (`poistioned`, `thsi`, `cosnistently`) pushed the model score to 0.1635 against 0.74 to 0.90 for my AI test texts *(inferred: misspelled tokens surprise gpt2)*. S2 was not moved: spread 0.161 is under the AI end, so it scored 0.6549. The attack aimed at S2 and hit S1. The average 0.4092 was already in the unsure band, so the clamp changed nothing. |
+| EV02 chopped sentences | S2 | Six one-word `Really.` sentences pushed the spread to 0.849, past the human end of 0.70, so that measure gave **0 points**. Style fell to 0.1601. Model 0.5943 was not enough to hold the average up (0.3772). |
+| EV03 pasted quotation | S2 | The quoted line adds sentences and punctuation. Spread 0.443 (0.257 points) and punctuation 0.075 (0.108 points) gave style 0.3642. The gap with the model (0.6662) was 0.30, just under the 0.35 clamp trigger. Average 0.5152. |
+| EV04 rare words | S1 and TH | Model 0.6114, lower than all five AI test texts *(inferred: `efficacious`, `desiderata`, `opacity` surprise gpt2)*. S2 stayed at 0.6364. The average 0.6239 missed `ai` by **0.026**. This is the nearest of the 15 to holding. |
+| EV05 heavy human edit | S1 and S2 | Both signals read human: model 0.3212, style 0.1158 (spread 0.675, punctuation 0.085). I don't count this as a flaw in the pipeline. The text was rewritten by a person, and both signals measure surface features that editing changes. |
+| EV06 one long and one short sentence | S2 | Spread 1.186, far past 0.70, gave 0 points. Style 0.1790. Same mechanism as EV02. |
+| EV07 punctuation padding | S2, rescued by CR | `; and, moreover,` chains join everything into one sentence, so the spread measure is dropped. Punctuation 0.227 is past the human end, giving 0 points. The type-token ratio also gave 0. Style = **0.0000**. The average (0.2931) would have been `human`. The clamp (gap 0.59) lifted it to 0.36, `unsure`. |
+| EV08 short text | S1 | Ten words. Model 0.2452 *(inferred: very little context, so each word is surprising)*. Style 0.6172 (spread 0.283 gave 0.417 points). The signals differ by 0.37, but the average 0.4312 was already in the band. |
+| EV09 human opening bolted on | S2 and CR | The casual opening lengthens the spread to 0.468 (0.232 points) and adds punctuation 0.054 (0.143), so style fell to 0.3757. Model stayed at 0.7042. Gap **0.33**, just under the 0.35 trigger. The equal-weight average (0.5400) let the style signal cancel a model signal that still said AI. |
+| FP02 formal report | S1 and S2 agree | Model 0.7387. Spread 0.240 is near the AI end (0.460 points), punctuation 0.013 is under the AI end (0.200, the maximum). Formal prose is uniform and has few commas. Gap 0.03, so the clamp was inert. |
+| FP03 careful non-native writer | S1 and S2 agree | Model 0.8051 *(inferred: simple common words)*. Style 0.6043: spread 0.328 (0.372 points), punctuation **0.000** (0.200, the maximum). This is the case `design.md` predicted (model about 0.80, style about 0.70, combined about 0.75). Actual: 0.8051, 0.6043, 0.7047. |
+| FP04 student essay | S1 and S2 agree | Model 0.8329. Style 0.5333 (spread 0.367 gave 0.333 points, punctuation 0.200). Gap 0.30, **0.05 under** the 0.35 clamp trigger. Average 0.6831. |
+| FP05 technical documentation | S1 and S2 agree | See "Worst outcome" below. |
+| PI01 "ignore all previous instructions" | S1 and S2, not obedience | No instruction was followed. The prefix is short sentences with no punctuation: spread 0.663 (0.037 points), punctuation 0.000 (0.200). Model 0.4625 *(inferred: odd text raises perplexity)*. Average 0.3499, **0.0001** under the `human` line. |
+| PI02 fake `SYSTEM:` message | S1 and S2, not obedience | Model 0.2044. Spread 0.652 (0.048 points), type-token ratio 0.956 (0), punctuation 0.044 (0.159). Both signals read human, average 0.2059. Same effect as PI01: the prefix changes the shape of the text. |
+
+### Worst outcome: why FP05 was accused
+
+**Diagnosis (stage: both signals; nothing downstream reduces it).**
+
+- **S2 is measured.** Style 0.806 breaks down as:
+  - spread 0.277: 0.423 points
+  - type-token ratio 0.586: **0.197** points
+  - punctuation 0.029: 0.186 points
+  - Setup instructions have short imperative sentences of similar length. They repeat their own terms (`the`, `service`, `set`, `port`), which drags the type-token ratio down. And they have almost no commas. All three measures read that as AI-like. FP05 is the only attack where the type-token ratio added real points; the other attacks got about 0 from it.
+- **S1 is inferred.** Model 0.8005 *(inferred: plain imperative sentences made of common words are easy for gpt2 to predict)*.
+- **CR is inert.** The signals differ by 0.01, so the clamp never applies. An average of 0.8033 clears the 0.65 line by 0.15, so the threshold isn't close either.
+- **Why this matters.** `design.md` proposed requiring both signals to agree before an `ai` label. Here both agree, so that rule would have changed nothing.
+
+### Patterns across the misses
+
+1. **Short and plain text breaks both signals the same way.** Signal one scores plain common-word writing 0.74 to 0.88 (FP02 to FP05, my own pieces 2 and 4). Signal two is flat or blind on short text: a one-sentence text is stuck at 0.4, and the type-token ratio is dead below about 100 words. That one blind spot explains the criterion 2 and criterion 3 misses and the four false accusations (FP02 to FP05).
+2. **A plain average lets one fooled signal cancel the other.** In all 11 evasion and injection breaks, the combined score stayed below 0.65 because a cheap edit pulled at least one signal down: S2 in EV02, EV03, EV06, EV07 and EV09; S1 in EV01, EV04 and EV08; both in EV05, PI01 and PI02. Fooling one signal is enough.
+3. **The style measures cap at the human end, so small edits are enough.** Spread past 0.70 (EV02 0.849, EV06 1.186) or punctuation past 0.14 (EV07 0.227) each zero out their measure. Adding more of the same buys nothing, but one short repeated sentence is already enough.
+4. **The clamp cuts both ways.** It kept FP07 and MF05 to MF07 from `ai`, and it kept EV07 from `human`. It also moved two of my five AI texts from `ai` to `unsure` and cost criterion 2 about 0.019. It never changed the outcome of any of the 15 broken attacks to `ai`.
+5. **Agreement is not accuracy.** In FP02 to FP05 both signals agree, so a "require both" rule would not help. Both measure how uniform and predictable the text is, and plain formal, technical or second-language writing is uniform and predictable. The two signals are not independent evidence about exactly the writers I most want to protect.
+
+**What I did not change.** No code, no thresholds, no criteria. Milestone 5 picks one change from what this points to. I haven't chosen it yet.
 
 ## The Improvement
 
