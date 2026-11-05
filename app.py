@@ -4,22 +4,11 @@ Provenance Guard — the web service.
 
     python app.py
 
-Then, in another terminal:
-
-    curl -X POST http://127.0.0.1:5000/ping \
-      -H "Content-Type: application/json" \
-      -d '{"message": "hello"}'
-
-That's the example route. It works right now, before you've written anything.
-**Leave it alone** — it's your control. When something breaks later, check that
-`/ping` still answers: if it does, the problem is in your handler; if it
-doesn't, it's the service itself.
-
 Routes:
 
     POST /ping        the worked example. Already works. Don't edit it
-    POST /submit      ← YOU BUILD THIS (Milestone 3, 4, 5)
-    POST /appeal      ← YOU BUILD THIS (Milestone 5)
+    POST /submit      decide about a piece of text (rate limited)
+    POST /appeal      a writer says we got it wrong
     GET  /log         the audit log. Already works
     GET  /health      is the service up, and is the model loaded
 """
@@ -41,28 +30,11 @@ MAX_TEXT_CHARS = 20_000
 
 
 # ── Rate limiting — UNIT 8 ────────────────────────────────────────────────────
-# Off until you turn it on. In unit 8, Milestone 1:
-#
-#   1. Set RATE_LIMITING_ENABLED = True in config.py (or AI201_RATE_LIMITS=1)
-#   2. Choose your numbers there
-#   3. Uncomment the @limiter.limit(...) line on /submit below
-#
-# The order doesn't matter. While limiting is off, that decorator is a no-op
-# that quietly does nothing, so uncommenting it early costs you nothing — but
-# it also means no 429 until you've done step 1.
-#
-# The storage backend is preconfigured, which stops Flask-Limiter printing a
-# warning on every start. In-memory is right for one laptop and wrong for
-# anything real — a restart forgets every count.
+# Turned on in config.py (RATE_LIMITING_ENABLED). The decorator on /submit
+# below is live. If limiting is ever switched off, it quietly does nothing.
 
 class _LimiterOff:
-    """
-    Stands in for the real limiter while rate limiting is off.
-
-    It makes @limiter.limit(...) a decorator that returns the route
-    untouched, so uncommenting the line before you flip the setting is
-    harmless instead of a crash on startup.
-    """
+    """Stands in for the real limiter while rate limiting is off."""
 
     def limit(self, *args, **kwargs):
         return lambda view: view
@@ -75,18 +47,12 @@ if config.RATE_LIMITING_ENABLED:
 
     def rate_limit_key():
         """
-        Who a request counts against.
-
-        Falling back to the caller's address is the easy version. Unit 8's
-        stretch asks about per-creator limits instead — and the difference
-        matters: one script can look like a thousand callers, and one household
-        can look like one.
+        Who a request counts against: the creator_id if there is a usable one,
+        otherwise the caller's address.
         """
         payload = request.get_json(silent=True)
-        # A body that parses as JSON but isn't an object — a bare list or
-        # string — has no .get. Without this guard the key function raises
-        # BEFORE the route runs, and a malformed request becomes a 500 that
-        # looks like your handler crashed when your handler never ran.
+        # A body that parses as JSON but isn't an object has no .get. Without
+        # this guard the key function raises BEFORE the route runs.
         if not isinstance(payload, dict):
             return get_remote_address()
         creator = payload.get("creator_id")
@@ -109,8 +75,11 @@ if config.RATE_LIMITING_ENABLED:
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             payload = {}
+        creator = payload.get("creator_id")
+        if not (isinstance(creator, str) and creator.strip()):
+            creator = "unknown"
         audit.log_rejection(
-            creator_id=payload.get("creator_id", "unknown"),
+            creator_id=creator,
             reason="rate_limited",
             limit=str(exc.description),
         )
@@ -154,7 +123,7 @@ def health():
     })
 
 
-# ── YOU BUILD THIS ────────────────────────────────────────────────────────────
+# ── The submission route ──────────────────────────────────────────────────────
 
 def _reject(status_code, error, message, creator_id="unknown"):
     """
@@ -168,17 +137,13 @@ def _reject(status_code, error, message, creator_id="unknown"):
 
 
 @app.post("/submit")
-# @limiter.limit(f"{config.RATE_LIMIT_PER_MINUTE}/minute;{config.RATE_LIMIT_PER_DAY}/day")
+@limiter.limit(f"{config.RATE_LIMIT_PER_MINUTE}/minute;{config.RATE_LIMIT_PER_DAY}/day")
 def submit():
     """
     Take a piece of text, decide about it, log the decision, answer.
 
     Expects JSON:
         {"text": "...", "creator_id": "..."}
-
-    Milestone 4 state: both signals are real and combined into one score.
-    The label TEXT is still a placeholder from scoring.score_to_label until
-    Milestone 5; the guess (ai / human / unsure) is already real.
     """
     payload = request.get_json(silent=True)
 
@@ -225,7 +190,7 @@ def submit():
     # 5. Signal two, then the combining rule, then the guess.
     style_score = stylometry.style_signal(text)
     confidence = scoring.combine_signals(model_score, style_score)
-    guess, label = scoring.score_to_label(confidence)   # label text: Milestone 5
+    guess, label = scoring.score_to_label(confidence)
 
     content_id = str(uuid.uuid4())
     status = "decided"
@@ -302,6 +267,7 @@ def appeal():
         "message": "We received your appeal and marked this submission for review.",
     }), 200
 
+
 # ── Already works ─────────────────────────────────────────────────────────────
 
 @app.get("/log")
@@ -310,9 +276,6 @@ def get_log():
     The audit log, most recent last.
 
         curl "http://127.0.0.1:5000/log?limit=10"
-
-    You need this in unit 8 to paste entries into your README, and you need it
-    now to see whether your logging is actually working.
     """
     limit = request.args.get("limit", type=int)
     entries = audit.read_entries(limit=limit)
