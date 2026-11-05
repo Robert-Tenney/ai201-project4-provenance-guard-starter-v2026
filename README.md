@@ -260,7 +260,6 @@ PS> curl.exe "http://127.0.0.1:5000/log?limit=2"
 ## How I Used AI
 
 
-
 **Moment 1: the style signal and the false positive it let through**
 
 - *What I asked for:* An implementation of `stylometry.py` and the combining rule, with the disagreement clamp.
@@ -272,8 +271,6 @@ PS> curl.exe "http://127.0.0.1:5000/log?limit=2"
 - *What I asked for:* The completed `config.py` and `app.py` for Milestone 1, and help writing up the Rate Limiting section from my real output.
 - *What came back:* Limiter settings of 5 per minute and 50 per day with reasoning, the activated `@limiter.limit(...)` decorator, a small change to the 429 handler so it logs `"unknown"` instead of a non-string `creator_id`, and a draft of the README section.
 - *What I checked:* I ran the flood test myself and used its real output. When my first log read-back showed only the `flood_tester` rejections and no decisions, I re-ran the three-text check until `m1_check` decisions appeared, rather than pasting entries that didn't show what the section claimed. *(Edit this to say what you actually changed or decided about the limits yourself.)*
-
-
 
 ---
 
@@ -453,7 +450,7 @@ Scores come from `logs/audit.jsonl`. Gap is the absolute difference between the 
 
 All of these are HELD. Every refusal left a log entry.
 
-**Rows that never reached my route.** RQ10 and RQ11 have no usable `creator_id`, so they count against my own address (`127.0.0.1`). RQ02, RQ06, RQ07, RQ08 and RQ09 used up the limit of 5 a minute first, and RQ10 and RQ11 came back 429 before the route ran. They are logged as `rate_limited` with `creator_id: "unknown"`, not as `invalid_body`. I marked them HELD because the request was refused, but this says nothing about my validation. I re-ran both after a minute: *<TO FILL: result of `--id RQ10` and `--id RQ11`, expected 400 `invalid_body`>*.
+**Rows that never reached my route.** RQ10 and RQ11 have no usable `creator_id`, so they count against my own address (`127.0.0.1`). RQ02, RQ06, RQ07, RQ08 and RQ09 used up the limit of 5 a minute first, and RQ10 and RQ11 came back 429 before the route ran. They are logged as `rate_limited` with `creator_id: "unknown"`, not as `invalid_body`. I marked them HELD because the request was refused, but this says nothing about my validation. The after-run gave the same 429 for both. I re-ran both after a minute: *<TO FILL: result of `--id RQ10` and `--id RQ11`, expected 400 `invalid_body`>*.
 
 **Flood family.** FL01_01 to FL01_05 got through and FL01_06 to FL01_12 got 429: five passed, seven were limited, matching the limit of 5 a minute.
 
@@ -980,11 +977,11 @@ The last-but-one row is the honest tension in this project. A change that catche
 
 ### One replay I rejected as an artifact
 
-My first replay of the chosen idea showed a criterion 2 gap of **0.426**. I threw that number out. Removing punctuation without pinning one-sentence text made every single-sentence piece of mine score a style of 0.0, which lowered the human mean through the clamp for no real reason. The 0.2635 above is the version I trust.
+My first replay of the chosen idea showed a criterion 2 gap of **0.426**. I threw that number out. Removing punctuation without pinning one-sentence text made every single-sentence piece of mine score a style of 0.0, which lowered the human mean through the clamp for no real reason. The 0.2635 above is the version I trust, and the after-run confirmed it.
 
 ### Prediction, written before the after-run
 
-From `python replay_changes.py` (saved in `results/predicted_after.md`). This is a replay of the logged model scores through the new style formula. It is **not** a result.
+From `python replay_changes.py` (saved in `results/predicted_after.md`). This is a replay of the logged model scores through the new style formula. It is **not** a result. The real after-run is in the next section.
 
 | What | Before (real) | Predicted after |
 |---|---|---|
@@ -1000,7 +997,7 @@ From `python replay_changes.py` (saved in `results/predicted_after.md`). This is
 | Criterion 3: labels `ai` / `human` / `unsure` over 12 | 2 / 0 / 10 | 2 / 0 / 10 |
 | AI texts labelled `ai` (of 5) | 2 | 3 |
 
-**What I expect, in plain words.** It fixes one false accusation (FP04), moves the injection from `human` to `unsure`, and catches one more AI text, with no new false accusation in my own writing. It does **not** fix criterion 2 or 3, it does not help evasion at all, and it does not touch the worst outcome: FP05 stays accused at about 0.79. FP03 stays accused by only 0.0052, so I would not call it fixed in any meaningful sense.
+**What I expected, in plain words.** It fixes one false accusation (FP04), moves the injection from `human` to `unsure`, and catches one more AI text, with no new false accusation in my own writing. It does **not** fix criterion 2 or 3, it does not help evasion at all, and it does not touch the worst outcome: FP05 stays accused at about 0.79. FP03 stays accused by only 0.0052, so I would not call it fixed in any meaningful sense.
 
 ### Limits I know about
 
@@ -1011,48 +1008,108 @@ From `python replay_changes.py` (saved in `results/predicted_after.md`). This is
 
 ### Before and after, side by side
 
-Fill the After column from the real after-run. If it differs from the prediction, say so and say why.
+The after-run was `python run_attacks.py --set attack_set --label after` (report `results/attack_run_2026-11-05_1446_after.md`, verdicts filled by `python fill_verdicts.py`), `python run_eval.py --label after` (`results/run_2026-11-05_1447_after.md`) and `python run_checks.py --label after2` (`results/checks_2026-11-05_1451_after2.md`). The service was restarted with the new `stylometry.py` before it.
 
-**Attacks** (`python run_attacks.py --set attack_set --label after`, then `python fill_verdicts.py` on its report):
+**Attacks: 13 BROKE and 43 HELD, exactly as predicted** (before: 15 and 41).
 
 | Family | Before BROKE | Predicted after | After (real) |
 |---|---|---|---|
-| evasion | 9 | 9 | *TO FILL* |
-| false_positive | 4 | 3 | *TO FILL* |
-| prompt_injection | 2 | 1 | *TO FILL* |
-| malformed and flood | 0 | 0 | *TO FILL* |
-| **Total** | **15** | **13** | *TO FILL* |
+| evasion | 9 | 9 | **9** (EV01 to EV09; EV10 held) |
+| false_positive | 4 | 3 | **3** (FP02, FP03, FP05) |
+| prompt_injection | 2 | 1 | **1** (PI02) |
+| malformed and flood | 0 | 0 | **0** |
+| **Total** | **15** | **13** | **13** |
 
-The rows that were predicted to change:
+The six rows I predicted one by one, all matching to four decimals:
 
-| ID | Before: guess, combined | Predicted after | After (real) |
+| ID | Before: guess, combined | Predicted after | After (real): guess, model, style, combined |
 |---|---|---|---|
-| FP04 | `ai`, 0.6831 | `unsure`, 0.6248 | *TO FILL* |
-| FP08 | `unsure`, 0.3947 | `human`, 0.3280 | *TO FILL* |
-| PI01 | `human`, 0.3499 | `unsure`, 0.3600 | *TO FILL* |
-| FP02 | `ai`, 0.7228 | `ai`, 0.6863 | *TO FILL* |
-| FP03 | `ai`, 0.7047 | `ai`, 0.6552 | *TO FILL* |
-| FP05 | `ai`, 0.8033 | `ai`, 0.7879 | *TO FILL* |
+| FP04 | `ai`, 0.6831 | `unsure`, 0.6248 | `unsure`, 0.8329, 0.4167, **0.6248** |
+| FP08 | `unsure`, 0.3947 | `human`, 0.3280 | `human`, 0.3223, 0.3337, **0.3280** |
+| PI01 | `human`, 0.3499 | `unsure`, 0.3600 | `unsure`, 0.4625, 0.0467, **0.3600** |
+| FP02 | `ai`, 0.7228 | `ai`, 0.6863 | `ai`, 0.7387, 0.6338, **0.6863** |
+| FP03 | `ai`, 0.7047 | `ai`, 0.6552 | `ai`, 0.8051, 0.5054, **0.6552** |
+| FP05 | `ai`, 0.8033 | `ai`, 0.7879 | `ai`, 0.8005, 0.7753, **0.7879** |
 
-**Criteria** (`python run_eval.py --label after`, `python run_checks.py --label after`):
+The ten evasion rows, combined score before and after:
+
+| ID | Before | After | Label after |
+|---|---|---|---|
+| EV01 | 0.4092 | 0.3940 | `unsure` |
+| EV02 | 0.3772 | 0.3600 | `unsure` |
+| EV03 | 0.5152 | 0.4935 | `unsure` |
+| EV04 | 0.6239 | 0.6180 | `unsure` |
+| EV05 | 0.2185 | 0.1760 | `human` |
+| EV06 | 0.3759 | 0.3600 | `unsure` |
+| EV07 | 0.3600 | 0.4931 | `unsure` |
+| EV08 | 0.4312 | 0.3830 | `unsure` |
+| EV09 | 0.5400 | 0.4974 | `unsure` |
+| EV10 (held) | 0.8926 | 0.8684 | `ai` |
+
+**Criteria** (the after numbers come from `results/run_2026-11-05_1447_after.md`; all three trials were identical again):
 
 | Criterion | Before | Predicted after | After (real) | Verdict after |
 |---|---|---|---|---|
-| 1. own pieces labelled `ai` | 0 of 10, MET | 0 of 10 | *TO FILL* | *TO FILL* |
-| 2. gap, AI mean minus human mean | 0.2427, MISSED | 0.2635 | *TO FILL* | *TO FILL* |
-| 3. labels `ai` / `human` / `unsure` | 2 / 0 / 10, MISSED | 2 / 0 / 10 | *TO FILL* | *TO FILL* |
-| 4. appeal path | PASS ×3, MET | no change | *TO FILL* | *TO FILL* |
-| 5. bad input | PASS ×3, MET | no change | *TO FILL* | *TO FILL* |
+| 1. own pieces labelled `ai` | 0 of 10 | 0 of 10 | **0 of 10** (2 `human`, 8 `unsure`) | **MET**, same caveat as before |
+| 2. gap, AI mean minus human mean | 0.2427 | 0.2635 | **0.2635** (AI mean 0.6752, human mean 0.4117); 5 of 5 AI texts above 0.50 | **MISSED** (0.2635 < 0.30) |
+| 3. labels `ai` / `human` / `unsure` | 2 / 0 / 10 | 2 / 0 / 10 | **2 / 0 / 10**; borderline 4 of 4 `unsure` | **MISSED** (`human` never appeared) |
+| 4. appeal path | PASS ×3 | no change | **PASS ×3** (`after2`; see below) | **MET** |
+| 5. bad input | PASS ×3 | no change | **PASS ×3** (`after2`; see below); five bad bodies through `run_eval.py` gave 400, 400, 400, 400, 413 in every trial | **MET** |
 
-**Worst outcome, FP05, after:** *TO FILL: guess, model, style, combined.* Predicted: still `ai`, combined 0.7879.
+The criterion 2 AI texts after the change: 0.6934, 0.6400, 0.6400, 0.7189, 0.6836 (mean 0.6752). My human group is unchanged at 0.3110, 0.2550, 0.5244, 0.5067, 0.4612 (mean 0.4117), because one-sentence text is pinned at 0.4. The AI texts labelled `ai` went from 2 to 3 (the fifth text, 0.6298 to 0.6836). The other two AI texts are still clamped to 0.64.
 
-**Did the change cost anything?** *TO FILL: any attack or criterion that got worse, and by how much.*
+**The first after-run of `run_checks.py` failed, and I kept its report** (`results/checks_2026-11-05_1447_after.md`). Criterion 5 failed in all three trials with "body is a list: HTTP 429, rate limited before validation ran (not tested)", and trial 3 also failed criterion 4 ("log gained 9 appeal lines, expected 10") and criterion 5 ("log gained 0 rejection lines, expected 6"). I think two things caused it, and both fit the evidence:
+
+- The JSON-list request has no `creator_id`, so it counts against my own address (5 per minute). I started `run_checks.py` within about a minute of the attack run, which had used that allowance on its `RQ` rows.
+- The old script compared the number of appeal and rejection lines in `GET /log?limit=500`, which stops working once the log passes about 500 lines.
+
+I did **not** confirm the line count in `logs/audit.jsonl` or which limit the 429s hit. I rewrote the script so it counts only this run's lines (appeals by their `content_id`, rejections by timestamp) and waits and retries once after a 429. That passed in all three trials. So criteria 4 and 5 were measured with two versions of the script: the before-run with the old one, `after2` with the new one. The service's appeal and validation code did not change in Milestone 5, but this is a difference in the test, and I have said so here.
+
+**Worst outcome, FP05, after:**
+
+```json
+{
+  "guess": "ai",
+  "confidence": 0.7879,
+  "model_score": 0.8005,
+  "style_score": 0.7753
+}
+```
+
+Still accused, as predicted. The combined score went from 0.8033 to 0.7879, so the change did not touch it in any way that matters.
+
+**Did the change cost anything?** No label got worse, and three got better (FP04, FP08, PI01). Two things got worse or are not what they look like:
+
+- **Evasion drifted the wrong way.** Eight of the nine broken evasion rows scored lower, so further from the `ai` line, by 0.006 to 0.048 (EV05 0.2185 to 0.1760, EV08 0.4312 to 0.3830, EV09 0.5400 to 0.4974). EV10, which held, went from 0.8926 to 0.8684. No label changed, so the evasion count stayed at 9, but the margin on a few rows is a little worse. The reason, from the style scores: with punctuation gone, texts with few commas lose the AI-ness points it used to give them, and texts where spread or type-token ratio already read human have nothing left to pull them back (EV02 and EV06 now have a style of exactly 0.0).
+- **EV07 moved the other way, and it isn't an improvement.** Its style went from 0.0 to 0.4 because the punctuation padding joins everything into one sentence, and one-sentence text is now pinned at 0.4. It is still `unsure`.
 
 ---
 
 ## What's Still Broken
 
-*Unit 8.*
+### The trade-off I chose
+
+I chose to let AI text through rather than wrongly accuse a writer, so the `unsure` band is wide and the clamp pulls every disagreement into it. The price is that 9 of my 10 evasion attacks got past the `ai` label and `human` almost never appears, and I'd make that trade again because the label lands on a person who can't see how it was reached, but it means this tool cannot be relied on to catch AI text on its own.
+
+### What still fails, most serious first
+
+1. **A careful, plain human writer can still be told their work "may have been written with AI".** FP02, FP03 and FP05 are still accused after Milestone 5 (combined 0.6863, 0.6552 and 0.7879). FP05, the worst outcome, hardly moved (0.8033 to 0.7879): both signals agree at about 0.80, so the clamp is inert and no change to the style formula reaches it. The cause is in the Diagnosis: both signals measure how uniform and predictable text is, and plain formal, technical or second-language writing is uniform and predictable. Fixing this needs a signal that isn't measuring the same thing, and I don't have one. FP03 is accused by only 0.0052, so a small change could flip it either way, which is not the same as having fixed it.
+2. **Cheap edits still defeat it: 9 of my 10 evasion attacks got a label other than `ai`, before and after Milestone 5.** The change did nothing for them, and 8 of the 9 now score slightly further from `ai` (by 0.006 to 0.048). A plain average lets one fooled signal cancel the other, and one short repeated sentence, a handful of typos or some rare words is enough. I did not try a rule that uses the lower of the two signals or weights them differently by text length, so I cannot say whether that would help or would just accuse more writers; in my replay every change that caught more AI text also accused more real writers.
+3. **A one-sentence text has no real style score.** `ONE_SENTENCE_STYLE = 0.4` is the number the old formula happened to give, kept so Milestone 5 changed one thing. It says nothing true about the text, and it is why EV07's style went from 0.0 to 0.4. With it, combined = 0.5 × model + 0.2, so a one-sentence text can only be labelled `human` if gpt2 scores it 0.30 or lower, and in my data most plain one-sentence writing scored 0.6 to 0.85 on gpt2. Short human text is therefore labelled `unsure` at best.
+4. **Criteria 2 and 3 are still missed.** The gap went from 0.2427 to 0.2635 against a target of 0.30, and `human` still never appears among the 12 inputs. I did not lower either target, because both were measurable and lowering a target I had missed would hide the result.
+5. **The label for a wrongly accused person depends on an appeal nobody reads yet.** `/appeal` records the writer's reasoning beside the decision and replies `under_review`, and the log keeps both. Nothing in this repo reads the appeals, changes a label or tells the writer the outcome. That is a gap in the process, not just in the scoring.
+6. **The rate limit follows `creator_id`, so changing it gets a fresh allowance.** It stops a burst from one id (10 of 15 requests were refused in the flood test), but a script that rotates ids is not slowed. Requests with no usable `creator_id` share one counter on my own address, which is why RQ10 and RQ11 were refused before my validation ran (in the before-run and again in the after-run), and why my first after-checks run failed.
+7. **Non-English text is scored by an English model.** MF07, a real Arabic sentence, scored 0.9064 on signal one, and only the clamp kept it from `ai`. I did not test other languages beyond the one row.
+8. **A gain I should not count.** PI01 moves from `human` to `unsure` only because the signals disagree by 0.42 and the clamp lifts it to 0.36. The injected instruction still moves the signals. It just doesn't land on `human` any more.
+
+### What my testing can't tell me
+
+- **I chose the Milestone 5 change and tested it on the same texts.** The after-run confirmed it behaves as replayed (it matched to four decimals), not that it's a good change. A fresh set of human and AI texts would, and I don't have one.
+- **My ten pieces of writing are single short sentences,** so criterion 1 (MET) says very little about paragraph-length writing, where the attack run accused 4 of 8 real-writing attacks before Milestone 5 and 3 of 8 after.
+- **The AI texts were written by an AI assistant for this test.** They are one kind of AI text. Text from other models, or text prompted to sound personal, is untested beyond the ten evasion attacks.
+- **gpt2 gave identical scores in all three trials,** so the three trials checked that the harness is stable, and no more. They do not add independent samples.
+- **Only 56 attacks and 24 real-vs-fake judgments,** and I wrote them. Small counts, no confidence intervals, and any one text moving past a threshold changes a percentage a lot.
+- **Criteria 4 and 5 were measured with two versions of `run_checks.py`.** The before-run used the original and the passing after-run used the rewrite. The service paths they test did not change in Milestone 5, but I cannot show the original script would have passed on the after-run.
 
 ---
 
