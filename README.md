@@ -27,7 +27,7 @@
 
 A submission takes this path:
 
-1. **Arrives at `POST /submit`** (`app.py::submit`). It validates the request: a JSON object, non-empty `text` under 20,000 characters, non-empty `creator_id`. Bad input gets a clear 4xx JSON error and a logged rejection, never a crash.
+1. **Arrives at `POST /submit`** (`app.py::submit`). It is rate limited per `creator_id`, then validated: a JSON object, non-empty `text` under 20,000 characters, non-empty `creator_id`. Bad input gets a clear 4xx JSON error and a logged rejection, never a crash.
 2. **Signal one** (`detector.py::model_signal`) runs gpt2 locally and adds a 0-1 score for how predictable the text is.
 3. **Signal two** (`stylometry.py::style_signal`) adds a 0-1 score for the shape of the text: sentence-length spread, vocabulary repetition, and punctuation.
 4. **The combining rule** (`scoring.py::combine_signals`) turns the two scores into one combined score.
@@ -255,19 +255,17 @@ PS> curl.exe "http://127.0.0.1:5000/log?limit=2"
 
 ## How I Used AI
 
-*Draft: edit so every line is true to what you did.*
-
-**Moment 1: acceptance criteria and design notes**
-
-- *What I asked for:* Help with the Milestone 1 trace and the Milestone 2 acceptance criteria.
-- *What came back:* A full `design.md` and five complete criteria with numbers and reasons.
-- *What I changed:* The brief says criteria should be my own, so I reviewed each one, asking whether someone who couldn't ask me could check it. *(Edit this to say what you actually changed, such as a number you adjusted or a reason you rewrote. If you changed nothing, say so plainly.)*
-
-**Moment 2: the style signal and the false positive it let through**
+**Moment 1: the style signal and the false positive it let through**
 
 - *What I asked for:* An implementation of `stylometry.py` and the combining rule, with the disagreement clamp.
 - *What came back:* Three measures with starting-guess scale endpoints, and a rule that clamps to "unsure" when the signals split.
 - *What I changed:* Nothing in the code, but running it showed problems the starting guesses hid. Type-token ratio did almost nothing (the AI paragraph scored 0.753, at the human end of my scale), and a human sentence plus one extra sentence scored 0.6539 and was labelled `ai`, because the clamp only fires when the signals disagree. I recorded both as findings instead of moving the thresholds, and noted a "both signals at least 0.5" rule as a fix to try in unit 8.
+
+**Moment 2 (unit 8, Milestone 1): rate limiting and the README write-up**
+
+- *What I asked for:* The completed `config.py` and `app.py` for Milestone 1, and help writing up the Rate Limiting section from my real output.
+- *What came back:* Limiter settings of 5 per minute and 50 per day with reasoning, the activated `@limiter.limit(...)` decorator, a small change to the 429 handler so it logs `"unknown"` instead of a non-string `creator_id`, and a draft of the README section.
+- *What I checked:* I ran the flood test myself and used its real output. When my first log read-back showed only the `flood_tester` rejections and no decisions, I re-ran the three-text check until `m1_check` decisions appeared, rather than pasting entries that didn't show what the section claimed. *(Edit this to say what you actually changed or decided about the limits yourself.)*
 
 **Also worth saying, if true:** `/appeal` kept returning `501 not_implemented` because my `app.py` still had the starter stub. I only found that by reading the response text, then replaced the function and restarted.
 
@@ -275,7 +273,99 @@ PS> curl.exe "http://127.0.0.1:5000/log?limit=2"
 
 ## Rate Limiting
 
-*Unit 8.*
+**Where:** `config.py` (`RATE_LIMITING_ENABLED = True`, `RATE_LIMIT_PER_MINUTE = 5`, `RATE_LIMIT_PER_DAY = 50`) and the `@limiter.limit(...)` decorator on `app.py::submit`. Counts are kept per `creator_id`, falling back to the caller's address when there is no usable one (`app.py::rate_limit_key`). `GET /health` reports `"rate_limiting": true`.
+
+**Why these numbers:** A real writer submits a piece, reads the label, and maybe edits and resubmits. Five in a minute is already a fast human, and 50 a day is far more than anyone submitting their own work needs. A script mapping my thresholds needs volume. At 50 a day, one creator_id gets 50 probes instead of a thousand, and the per-minute cap stops a burst outright. The cost is that a writer pasting in a dozen drafts in a row gets a 429 and waits a minute. The gap is that the limit follows `creator_id`, so a script that rotates creator_ids is not slowed by it.
+
+**Flood test** (`python run_attacks.py --flood 15`, output saved to `results/flood_2026-11-05_1301.md`):
+
+```
+200 200 200 200 200 429 429 429 429 429 429 429 429 429 429
+```
+
+Five requests got through, then the per-minute limit of 5 cut in. 10 of 15 were rate limited.
+
+**The rejections are in the log** (`GET /log?limit=20`). Each 429 left an entry. A rejection carries fewer fields than a decision because no decision was made, but it still records who, when, why and which limit:
+
+```json
+{
+  "creator_id": "flood_tester",
+  "event": "rejected",
+  "limit": "5 per 1 minute",
+  "reason": "rate_limited",
+  "status": "rejected",
+  "timestamp": "2026-11-05T18:01:30+00:00"
+}
+```
+
+All ten 429s appear in the log this way, matching the ten 429 status codes above. Without them the flood would have shown up only as five decisions and a gap.
+
+**A decision entry from the same run**, with all nine fields (`timestamp`, `content_id`, `creator_id`, `guess`, `model_score`, `style_score`, `combined_score`, `label`, `status`):
+
+```json
+{
+  "combined_score": 0.2152,
+  "content_id": "5ff5c9b8-67a6-4e99-a47b-fa6ee9f2a90c",
+  "creator_id": "flood_tester",
+  "guess": "human",
+  "label": "We think this was probably written by a person. This is an estimate, not a certainty.",
+  "model_score": 0.2588,
+  "status": "decided",
+  "style_score": 0.1716,
+  "timestamp": "2026-11-05T18:01:30+00:00"
+}
+```
+
+All five `flood_tester` decisions scored identically (0.2588 / 0.1716 / 0.2152), which fits the same text being sent each time and nothing in either signal being random.
+
+**Log check: three different texts read back with `GET /log?limit=3`:**
+
+I submitted three different pieces of text as `m1_check` and read them back. Each entry has all nine fields: `timestamp`, `content_id`, `creator_id`, `guess`, `model_score`, `style_score`, `combined_score`, `label`, `status`.
+
+```json
+{
+  "count": 3,
+  "entries": [
+    {
+      "combined_score": 0.4384,
+      "content_id": "6fba1788-2d18-4db3-b21b-cf86e82d4495",
+      "creator_id": "m1_check",
+      "guess": "unsure",
+      "label": "We can't tell whether this was written by a person or by an AI. That is not a judgment about your work, and plenty of people who write plainly get this result. If you would like it looked at, you can appeal.",
+      "model_score": 0.4767,
+      "status": "decided",
+      "style_score": 0.4,
+      "timestamp": "2026-11-05T18:07:32+00:00"
+    },
+    {
+      "combined_score": 0.6371,
+      "content_id": "64445260-a25b-4535-b4ea-7ab9efc37c4b",
+      "creator_id": "m1_check",
+      "guess": "unsure",
+      "label": "We can't tell whether this was written by a person or by an AI. That is not a judgment about your work, and plenty of people who write plainly get this result. If you would like it looked at, you can appeal.",
+      "model_score": 0.6132,
+      "status": "decided",
+      "style_score": 0.6609,
+      "timestamp": "2026-11-05T18:07:32+00:00"
+    },
+    {
+      "combined_score": 0.4191,
+      "content_id": "b3c6e458-2327-4761-b0db-70c894174c16",
+      "creator_id": "m1_check",
+      "guess": "unsure",
+      "label": "We can't tell whether this was written by a person or by an AI. That is not a judgment about your work, and plenty of people who write plainly get this result. If you would like it looked at, you can appeal.",
+      "model_score": 0.705,
+      "status": "decided",
+      "style_score": 0.1333,
+      "timestamp": "2026-11-05T18:07:32+00:00"
+    }
+  ]
+}
+```
+
+**Can a decision be reconstructed from an entry without my code?** Yes. Each decision entry holds both signal scores, the combined score, the guess and the exact label the writer saw, plus a `content_id` they can use to appeal. For example, the third entry shows signal one at 0.705 and signal two at 0.1333. Those differ by 0.57, more than the 0.35 gap, so the combining rule clamped the average into the unsure band. A reader can see why the result was "unsure" from the entry alone. It is the same split pattern described under the combining rule: signal one reads plain text as AI-like and signal two pulls it back.
+
+**A rejection is different.** A rate-limit entry has no `content_id`, scores or label, because no decision was made. From it you can reconstruct who was blocked, when, and by which limit (`5 per 1 minute`), but not what they submitted.
 
 ## Attack Run — Before
 
