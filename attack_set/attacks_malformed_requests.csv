@@ -1,0 +1,25 @@
+id,family,targets,raw_body,send_as,content_type
+RQ01,malformed,no text field at all,"{""creator_id"": ""attacker_RQ01""}",json,
+RQ02,malformed,no creator_id,"{""text"": ""Some writing that has no creator attached to it at all.""}",json,
+RQ03,malformed,text is a number,"{""text"": 12345, ""creator_id"": ""attacker_RQ03""}",json,
+RQ04,malformed,text is a list,"{""text"": [""a"", ""b""], ""creator_id"": ""attacker_RQ04""}",json,
+RQ05,malformed,text is null,"{""text"": null, ""creator_id"": ""attacker_RQ05""}",json,
+RQ06,malformed,creator_id is an object,"{""text"": ""Real writing here."", ""creator_id"": {""id"": ""x""}}",json,
+RQ07,malformed,"body is a JSON array, not an object","[""text"", ""creator_id""]",json,
+RQ08,malformed,body is unparseable JSON,"{""text"": ""unterminated",raw,application/json
+RQ09,malformed,body is empty,,raw,application/json
+RQ10,malformed,"body is form-encoded, not JSON",text=hello&creator_id=attacker_RQ10,raw,application/x-www-form-urlencoded
+RQ11,malformed,body is JSON claiming to be plain text,"{""text"": ""Real writing."", ""creator_id"": ""attacker_RQ11""}",raw,text/plain
+RQ12,malformed,deeply nested JSON,"{""text"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": {""a"": ""x""}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}, ""creator_id"": ""attacker_RQ12""}",json,
+FL01_01,flood_same_creator,20 rapid submissions from one creator,"{""text"": ""Testing the rate limit with a repeated submission body."", ""creator_id"": ""attacker_flood""}",json,
+FL01_02,flood_same_creator,20 rapid submissions from one creator,"{""text"": ""Testing the rate limit with a repeated submission body."", ""creator_id"": ""attacker_flood""}",json,
+FL01_03,flood_same_creator,20 rapid submissions from one creator,"{""text"": ""Testing the rate limit with a repeated submission body."", ""creator_id"": ""attacker_flood""}",json,
+FL01_04,flood_same_creator,20 rapid submissions from one creator,"{""text"": ""Testing the rate limit with a repeated submission body."", ""creator_id"": ""attacker_flood""}",json,
+FL01_05,flood_same_creator,20 rapid submissions from one creator,"{""text"": ""Testing the rate limit with a repeated submission body."", ""creator_id"": ""attacker_flood""}",json,
+FL01_06,flood_same_creator,20 rapid submissions from one creator,"{""text"": ""Testing the rate limit with a repeated submission body."", ""creator_id"": ""attacker_flood""}",json,
+FL01_07,flood_same_creator,20 rapid submissions from one creator,"{""text"": ""Testing the rate limit with a repeated submission body."", ""creator_id"": ""attacker_flood""}",json,
+FL01_08,flood_same_creator,20 rapid submissions from one creator,"{""text"": ""Testing the rate limit with a repeated submission body."", ""creator_id"": ""attacker_flood""}",json,
+FL01_09,flood_same_creator,20 rapid submissions from one creator,"{""text"": ""Testing the rate limit with a repeated submission body."", ""creator_id"": ""attacker_flood""}",json,
+FL01_10,flood_same_creator,20 rapid submissions from one creator,"{""text"": ""Testing the rate limit with a repeated submission body."", ""creator_id"": ""attacker_flood""}",json,
+FL01_11,flood_same_creator,20 rapid submissions from one creator,"{""text"": ""Testing the rate limit with a repeated submission body."", ""creator_id"": ""attacker_flood""}",json,
+FL01_12,flood_same_creator,20 rapid submissions from one creator,"{""text"": ""Testing the rate limit with a repeated submission body."", ""creator_id"": ""attacker_flood""}",json,
